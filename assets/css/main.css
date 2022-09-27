@@ -228,11 +228,6 @@ hr {
 .align-right {
   text-align: right; }
 
-  .fancyresp {
-    width: 100%;
-    height: auto;
-  }
-
 /* Row */
 .row {
   display: flex;
