@@ -215,6 +215,17 @@ hr {
   hr.major {
     margin: 3em 0; }
 
+
+
+summary:hover {
+    color: #3ebd8a;
+    }
+details > summary {
+  cursor: pointer;
+
+}
+
+
 .align-left {
   text-align: left; }
 
@@ -1598,7 +1609,7 @@ button,
   .button:disabled {
     pointer-events: none;
     opacity: 0.25; }
-   
+
 
 /* Mini Posts */
 .mini-posts article {
