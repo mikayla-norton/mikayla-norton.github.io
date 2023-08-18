@@ -2,14 +2,29 @@
 
 <html>
 	<head>
-		<title>An Invasive Species Study on Severity - Mikayla Norton</title>
+		<title>Process Automation - Mikayla Norton</title>
 		<link rel="shortcut icon" type="image/png" href="images/Favicon.png"/>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
 		<link rel="stylesheet" href="assets/css/main.css" />
 	</head>
 	<body class="is-preload">
-
+		<script>
+		         var password = "vp9nwptFJogYt";
+		         (function passcodeprotect() {
+		            var passcode = prompt("Password required to view contents of this webpage. Materials are not yet public.");
+		            while (passcode !== password) {
+									if (passcode == null) {
+										window.location.href = 'https://mikayla-norton.github.io/'; //break out of the function early
+						    }
+									else {
+									 alert("Incorrect Password");
+		               return passcodeprotect();
+								 }
+		            }
+		         }());
+		         // alert('Welcome');
+		      </script>
 		<!-- Wrapper -->
 			<div id="wrapper">
 
@@ -19,7 +34,7 @@
 
 							<!-- Header -->
 								<header id="header">
-									<a href="invasive-species.html" class="logo"><strong>Invasive Species in Data Visualization</strong> - Mikayla Norton</a>
+									<a href="index.html" class="logo"><strong>Process Automation</strong> - Mikayla Norton</a>
 									<ul class="icons">
 										<li><a href="https://www.facebook.com/profile.php?id=100006002689323" class="icon brands fa-facebook-official"><span class="label">Facebook</span></a></li>
 										<li><a href="https://www.instagram.com/k.nort23/" class="icon brands fa-instagram"><span class="label">Instagram</span></a></li>
@@ -35,21 +50,26 @@
 							<!-- Content -->
 								<section>
 									<header class="main">
-										<h1>An Invasive Species Study on Severity</h1>
+										<h1>Automation of Funding Request Data Validation</h1>
 									</header>
-
-									<span class="image main"><img src="images/cmse 402 poster.png" alt="" /></span>
-									<h2>The conversation has slowed down... Are invasive species still a chronic issue in our environment nationally and globally?</h2>
-									<p>As an impassioned environmentalist, I chose to use a supporting topic under that umbrella for a project. This project utilized python for data wrangling, manipulation, and visualization. All final visualizations were combined into a virtual poster using Canva. Datasets were collected from the Global Invasive Species Database (GISD) and U.S. Department of Agriculture.</p>
-									<p>In this study, an emphasis was placed on the lack of discussion on the subject of invasive species as of late. Is this due to passive oblivion or a true solution? How does North America compare to other regions of the world? What era sourced the most invasive species to North America, and what types of organisms have been most prevalent?</p>
-									<p>Briefly summarizing my conclusions, invasive species have been on the climb since the 1980s, fitting the upward growth in overseas and air travel and shipping, making it a continual issue today as we continue our global commutes. Most organisms fall into the Animalia and Plantae kingdoms for being invasive, especially under the Arthropoda and Tracheophyta phylum. Many of the species are subspecies in similar families, as well as now considered common to our life in the US, for example, eucalyptus. While the majority of records source to the continental US, Hawaii struggles significantly with the count of cases, especially considering its comparative size. Additionally, most species have been introduced by humans, rather than being truly migratory. Finally, when comparing internationally, North America has the most registered cases by 2 more than Asia, indicating this to be a very real, current issue.</p>
-									<p> This project was conducted formally for a Computational Mathematics class at Michigan State, dedicated to Data Visualization.</p>
-									<p> To explore the Interactive pieces of this study further, check out the resource below: </p>
-
-									<div style="width:100%; padding-bottom:56.25%; position:relative;">
-										  <iframe src="assets/Taxonomic_Treemap_of_Invasive_Species.html" style="position:absolute; top:0px; left:0px;
-										  width:100%; height:100%; border: none; overflow: hidden;"></iframe>
-									</div>
+									<h2>How do we balance speed and spending surrounding the use of construction funding requests?</h2>
+								</br>
+								<div class="image main" style="width: 50%; margin: auto;"><img src="images/internshipProcess.png" alt="" /></div>
+								</br>
+									<p>During my internship with Intel Corporation in 2023, I was tasked with the automation of a manual review process for construction funding request data. The manual process was often complicated and time variant, due to the complex and imperfect nature of the data. The automation, built in Python, has the potential to reduce the required review time from 3 hours to 15 minutes per funding request, and reduce the amount of review cycles required per record.</p>
+									<p>The process automation, architected in Python, utilized file scraping to compare values and raw formulas stored in excel for accuracy and consistency with expected values. The automation also handled inconsistencies through implementation of fuzzy matching algorithms and strict data preprocessing. The final deliverable produces a raw data file of anomalistic values to be converted via pre-formatted pivot tables to a usable format for the reviewers and stakeholders. Histori cal logging allowed for a full database of records from prior automation run times and all forward looking requests. This database demonstrated top performers and offenders within the list of contractor partners, as well as what discplinary types were most likely to have an offense. By categorizing types of errors, analytics also demonstrated common anomalistic behavior, and could be used in avoidance tactics moving forward. </p>
+									<p>In full, by automating the process, data quality increased within the construction team, process time and manual touch requirements were reduced, the project was scoped for extension to other sites/contractors, construction projects moved up on the calendar, and cost avoidance opportunities became abundant.</p>
+									<p>The following python libraries were integral to the project:</p>
+										<ul>
+											<li>nltk</li>
+											<li>pandas</li>
+											<li>numpy</li>
+											<li>pylightxl & openpyxl</li>
+											<li>difflib</li>
+											<li>datetime</li>
+										</ul>
+									<div class="image main" style="width: 90%; margin: auto;"><img src="images/internshipPackages.png" alt="" /></div>
+									</p>
 
 								</section>
 
@@ -77,7 +97,7 @@
 													<li><a href="capstone.html">Supplier Data Management</a></li>
 													<li><a href="statistics-in-music.html">Music Popularity Predictor</a></li>
   												<li><a href="invasive-species.html">An Invasive Species Study on Severity</a></li>
-													<li><a href="type-a-data.html">Type A "Life Data"</a></li>
+  												<li><a href="type-a-data.html">Type A "Life Data"</a></li>
   												<li><a href="avah.html">Analysis of Voice and Hearing Lab</a></li>
   											</ul>
   										</li>
@@ -116,7 +136,6 @@
 											<li class="icon solid fa-home">East Lansing, MI</li>
 										</ul>
 									</section>
-
 
 
 							</div>
