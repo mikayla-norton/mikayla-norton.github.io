@@ -2306,7 +2306,7 @@ button,
 
     /* ---- particles.js container ---- */
 
-    #particles-js {
+/* #particles-js {
       position: relative;
       width: 100%;
       height: 10%;
@@ -2315,7 +2315,7 @@ button,
       background-repeat: no-repeat;
       background-size: cover;
       background-position: 50% 50%;
-    }
+    } */
 
     /* ---- plants.js container ---- */
     svg {
@@ -2331,9 +2331,9 @@ button,
       font-size: 24px;
       font-family: Helvetica, sans, monospace, sans-serif;
       -webkit-user-select: none;
-         -moz-user-select: none;
-          -ms-user-select: none;
-              user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+          user-select: none;
     }
 
     .back {
