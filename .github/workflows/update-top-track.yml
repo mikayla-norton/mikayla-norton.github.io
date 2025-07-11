@@ -1,0 +1,33 @@
+name: Update Top Track
+
+on:
+  schedule:
+    - cron: '0 0 * * *'   # every day at midnight UTC
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Fetch & write top-track.json
+        run: node spotify_monthly/update-top-track.js
+        env:
+          CLIENT_ID:     ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
+          REDIRECT_URI:  http://127.0.0.1:8888/callback
+
+      - name: Commit updated JSON
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add top-track.json
+          git diff --quiet || git commit -m "chore: daily top-track update" && git push

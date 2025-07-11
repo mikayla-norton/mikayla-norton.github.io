@@ -55,6 +55,7 @@
 										<ul class="actions">
 											<li><a href="https://www.linkedin.com/in/mikaylanorton" class="button big">Connect with Me</a></li>
 										</ul>
+										
 									</div>
 									<span class="image object">
 										<img src="images/headshot.jpg" alt="" />
@@ -289,6 +290,32 @@
 										<li><a href="#">Amet Lacinia</a></li> -->
 									</ul>
 								</nav>
+
+					
+										<section id="top-song-widget">
+										<div id="top-song">Loading top song…</div>
+										</section>
+
+										<script>
+										fetch('/top-track.json')
+											.then(r => r.json())
+											.then(t => {
+											document.getElementById('top-song').innerHTML = `
+												<h3>What I can't stop listening to:</h3>
+												<div style="position:relative; width:100%; height:80px;">
+												<iframe
+													src="https://open.spotify.com/embed/track/${t.id}?utm_source=generator"
+													style="position:absolute; top:0; left:0; width:100%; height:100%; border:0;"
+													allowfullscreen
+													allow="clipboard-write; encrypted-media; fullscreen; picture-in-picture">
+												</iframe>
+												</div>
+											`;
+											})
+											.catch(_ => {
+											document.getElementById('top-song').textContent = 'Unable to load top song.';
+											});
+										</script>
 
 							<!-- Section -->
 							<section>

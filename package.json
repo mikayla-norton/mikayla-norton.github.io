@@ -1,0 +1,8 @@
+{
+  "name": "spotify-monthly",
+  "version": "1.0.0",
+  "dependencies": {
+    "dotenv": "^17.2.0",
+    "spotify-web-api-node": "^5.0.2"
+  }
+}

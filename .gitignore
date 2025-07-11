@@ -1,2 +1,4 @@
 
 *.icloud
+.env
+spotify_monthly/.env
