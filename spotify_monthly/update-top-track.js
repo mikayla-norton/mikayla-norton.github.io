@@ -1,5 +1,12 @@
 // spotify_monthly/update-top-track.js
-require('dotenv').config();
+if (!process.env.GITHUB_ACTIONS) {
+  require('dotenv').config();
+}
+if (!process.env.CLIENT_ID || !process.env.CLIENT_SECRET || !process.env.REFRESH_TOKEN) {
+  console.error('❌ Missing one of CLIENT_ID, CLIENT_SECRET or REFRESH_TOKEN!');
+  process.exit(1);
+}
+
 const fs            = require('fs');
 const path          = require('path');
 const SpotifyWebApi = require('spotify-web-api-node');
