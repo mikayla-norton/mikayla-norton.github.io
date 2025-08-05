@@ -29,6 +29,12 @@ spotify.setRefreshToken(process.env.REFRESH_TOKEN);
     limit:      1
   });
   const t = top.body.items[0];
+  
+  console.log('🔎 fetched top track:', {
+  id:      t.id,
+  name:    t.name,
+  artists: t.artists.map(a => a.name)
+});
 
   // 3) write top-track.json into the repo root
   const out = {
