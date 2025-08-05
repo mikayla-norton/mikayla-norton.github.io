@@ -1,6 +1,7 @@
 name: Update Top Track
 
 on:
+  workflow_dispatch:      # manual trigger from the Actions UI
   schedule:
     - cron: '0 0 * * *'   # every day at midnight UTC
 
