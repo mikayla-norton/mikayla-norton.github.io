@@ -7,6 +7,7 @@ on:
 jobs:
   update:
     runs-on: ubuntu-latest
+    environment: Spotify
     steps:
       - uses: actions/checkout@v3
 
