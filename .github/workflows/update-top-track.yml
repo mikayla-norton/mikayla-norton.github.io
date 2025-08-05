@@ -16,6 +16,9 @@ jobs:
         with:
           node-version: '18'
 
+      - name: Pull latest changes
+        run: git pull origin main --rebase
+
       - name: Install deps
         run: npm ci
 
