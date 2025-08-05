@@ -7,7 +7,6 @@ on:
 jobs:
   update:
     runs-on: ubuntu-latest
-    environment: Spotify
     steps:
       - uses: actions/checkout@v3
 
@@ -18,6 +17,16 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Debug Spotify env
+        run: |
+          echo "CLIENT_ID:  $([[ -n \"$CLIENT_ID\" ]] && echo yes || echo no)"
+          echo "CLIENT_SECRET: $([[ -n \"$CLIENT_SECRET\" ]] && echo yes || echo no)"
+          echo "REFRESH_TOKEN: $([[ -n \"$REFRESH_TOKEN\" ]] && echo yes || echo no)"
+        env:
+          CLIENT_ID:     ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
+      
       - name: Fetch & write top-track.json
         run: node spotify_monthly/update-top-track.js
         env:
