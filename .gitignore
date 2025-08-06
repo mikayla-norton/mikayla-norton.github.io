@@ -2,3 +2,4 @@
 *.icloud
 .env
 spotify_monthly/.env
+.DS_Store
