@@ -1,0 +1,1060 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Woolgather — a stash &amp; project ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import {
+    getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import {
+    getFirestore, doc, getDoc, setDoc
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyAtt-elOm66NuX9KXlp2QlZz_7tB5SKZOs",
+    authDomain: "woolgather-5c173.firebaseapp.com",
+    projectId: "woolgather-5c173",
+    storageBucket: "woolgather-5c173.firebasestorage.app",
+    messagingSenderId: "666603709729",
+    appId: "1:666603709729:web:4e6239461e670a8e418a60"
+};
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  const provider = new GoogleAuthProvider();
+
+  window.FB = {
+    signIn(){
+      return signInWithPopup(auth, provider).catch(err => {
+        console.error(err);
+        alert("Sign-in failed: " + err.message);
+      });
+    },
+    signOutUser(){ return signOut(auth); },
+    onAuthChange(cb){ return onAuthStateChanged(auth, cb); },
+
+    async loadUserData(uid){
+      const snap = await getDoc(doc(db, 'stashes', uid));
+      return snap.exists() ? snap.data() : null;
+    },
+    async saveUserData(uid, data){
+      await setDoc(doc(db, 'stashes', uid), data);
+    },
+
+    async loadPresets(){
+      const snap = await getDoc(doc(db, 'presets', 'brands'));
+      return snap.exists() ? (snap.data().lines || null) : null;
+    },
+    // Only ever succeeds if the doc doesn't exist yet (see security rules above).
+    async seedPresetsIfEmpty(defaultLines){
+      try{
+        await setDoc(doc(db, 'presets', 'brands'), { lines: defaultLines });
+      }catch(e){
+        // Expected once the doc already exists — client writes are denied by design.
+      }
+    }
+  };
+
+  window.dispatchEvent(new Event('firebase-ready'));
+</script>
+<style>
+  :root{
+    --ink:#2A2333;
+    --ink-soft:#6E6178;
+    --bg:#E4E9DA;
+    --card:#F1EEF3;
+    --border:#C9C3CE;
+    --plum:#5C3A72;
+    --plum-dark:#472C59;
+    --forest:#3E6B49;
+    --sage:#8FAF7C;
+    --lilac:#9B7EC0;
+    --violet:#8B5FA3;
+    --wine:#7A2F4B;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'Work Sans', sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,.serif{ font-family:'Fraunces', serif; }
+  .wrap{ max-width:980px; margin:0 auto; padding:32px 20px 60px; }
+  header.app-header{ display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:28px; }
+  header.app-header h1{ font-size:1.9rem; font-weight:700; margin:0; letter-spacing:-0.01em; }
+  header.app-header p{ margin:4px 0 0; color:var(--ink-soft); font-size:0.92rem; }
+  .reset-btn{ background:none; border:none; color:var(--ink-soft); font-size:0.75rem; cursor:pointer; display:inline-flex; align-items:center; gap:5px; }
+  .reset-btn:hover{ color:var(--wine); }
+
+  nav.tabs{ display:flex; gap:20px; border-bottom:1px solid var(--border); margin-bottom:26px; flex-wrap:wrap; }
+  nav.tabs button{
+    background:none; border:none; cursor:pointer; padding-bottom:10px; margin-bottom:-1px;
+    font-family:inherit; font-size:0.9rem; font-weight:500; color:var(--ink-soft);
+    display:inline-flex; align-items:center; gap:6px; border-bottom:2px solid transparent;
+  }
+  nav.tabs button.active{ color:var(--plum); border-bottom-color:var(--plum); }
+  .icon{ width:15px; height:15px; display:inline-block; vertical-align:-3px; }
+
+  .btn{ display:inline-flex; align-items:center; gap:6px; border-radius:7px; font-weight:500; font-size:0.85rem; padding:8px 14px; cursor:pointer; border:1px solid transparent; font-family:inherit; }
+  .btn-primary{ background:var(--plum); color:#fff; }
+  .btn-primary:hover{ background:var(--plum-dark); }
+  .btn-ghost{ background:none; border-color:var(--border); color:var(--ink-soft); }
+  .btn-small{ padding:5px 10px; font-size:0.75rem; }
+
+  .card{ background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px; }
+  .empty{ border:1px dashed var(--border); border-radius:10px; padding:34px 20px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:10px; }
+  .empty p.title{ font-family:'Fraunces',serif; font-weight:600; margin:0; }
+  .empty p.body{ font-size:0.88rem; color:var(--ink-soft); max-width:420px; margin:0; }
+
+  label.field{ display:flex; flex-direction:column; gap:4px; font-size:0.85rem; color:var(--ink-soft); }
+  input,select,textarea{
+    font-family:inherit; font-size:0.87rem; padding:7px 10px; border-radius:6px; border:1px solid var(--border);
+    background:rgba(255,255,255,0.6); color:var(--ink);
+  }
+  input:focus,select:focus,textarea:focus{ outline:2px solid var(--lilac); outline-offset:1px; }
+  input[type="color"]{ padding:2px; width:48px; height:36px; }
+
+  .form-grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; }
+  .form-grid .span2{ grid-column:1/-1; }
+  @media (max-width:640px){ .form-grid{ grid-template-columns:1fr; } }
+
+  .stat-grid{ display:grid; grid-template-columns:repeat(6,1fr); gap:10px; margin-bottom:22px; }
+  @media (max-width:820px){ .stat-grid{ grid-template-columns:repeat(3,1fr); } }
+  @media (max-width:460px){ .stat-grid{ grid-template-columns:repeat(2,1fr); } }
+  .stat-tile p.label{ margin:0; font-size:0.72rem; color:var(--ink-soft); }
+  .stat-tile p.value{ margin:2px 0 0; font-size:1.25rem; font-weight:700; font-family:'Fraunces',serif; }
+  .stat-tile p.sub{ margin:2px 0 0; font-size:0.7rem; color:var(--ink-soft); }
+
+  .chart-grid{ display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:20px; }
+  @media (max-width:760px){ .chart-grid{ grid-template-columns:1fr; } }
+  .chart-card p.chart-title{ margin:0 0 10px; font-size:0.88rem; font-weight:500; }
+  .chart-holder{ position:relative; height:230px; }
+
+  .yarn-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+  @media (max-width:900px){ .yarn-grid{ grid-template-columns:1fr 1fr; } }
+  @media (max-width:560px){ .yarn-grid{ grid-template-columns:1fr; } }
+  .yarn-card{ position:relative; padding:16px 14px 14px; padding-top:20px; }
+  .yarn-hole{ position:absolute; top:10px; left:10px; width:11px; height:11px; border-radius:50%; background:var(--bg); border:1px solid var(--border); }
+  .yarn-top{ display:flex; align-items:flex-start; justify-content:space-between; gap:8px; padding-left:12px; }
+  .yarn-swatch-name{ display:flex; align-items:center; gap:10px; min-width:0; }
+  .swatch{ width:28px; height:28px; border-radius:50%; flex-shrink:0; border:1px solid var(--border); }
+  .yarn-name{ font-family:'Fraunces',serif; font-weight:600; margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .yarn-sub{ font-size:0.75rem; color:var(--ink-soft); margin:1px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .del-btn{ background:none; border:none; color:var(--ink-soft); cursor:pointer; padding:2px; }
+  .del-btn:hover{ color:var(--wine); }
+  .yarn-meta{ margin-top:12px; padding-top:9px; border-top:2px dashed var(--border); display:flex; justify-content:space-between; font-size:0.72rem; color:var(--ink-soft); }
+  .yarn-bottom{ margin-top:9px; display:flex; justify-content:space-between; align-items:center; font-size:0.85rem; }
+  .yarn-bottom input[type=number]{ width:56px; border:none; border-bottom:1px solid var(--border); background:transparent; padding:2px 0; border-radius:0; }
+
+  .swatch-row{ display:flex; gap:8px; margin-top:8px; }
+  .swatch-btn{ width:26px; height:26px; border-radius:50%; cursor:pointer; border:1px solid var(--border); }
+  .swatch-btn.selected{ border:2px solid var(--ink); }
+
+  .yarn-picker{ display:flex; flex-wrap:wrap; gap:8px; max-height:130px; overflow-y:auto; padding:8px; border:1px solid var(--border); border-radius:6px; }
+  .yarn-chip{ display:inline-flex; align-items:center; gap:6px; font-size:0.75rem; padding:4px 9px; border-radius:999px; border:1px solid var(--border); background:transparent; cursor:pointer; color:var(--ink); }
+  .yarn-chip.checked{ background:var(--bg); }
+  .yarn-chip .dot{ width:9px; height:9px; border-radius:50%; }
+
+  .project-row{ display:flex; align-items:flex-start; gap:12px; padding:14px 4px; border-bottom:1px dashed var(--border); }
+  .project-row:last-child{ border-bottom:none; }
+  .status-dot{ width:10px; height:10px; border-radius:50%; flex-shrink:0; margin-top:5px; }
+  .project-name{ font-size:0.92rem; font-weight:500; margin:0; }
+  .project-name .pattern{ font-weight:400; color:var(--ink-soft); }
+  .project-meta{ display:flex; align-items:center; gap:8px; margin-top:4px; flex-wrap:wrap; }
+  .project-meta .dot{ width:9px; height:9px; border-radius:50%; }
+  .project-meta .days{ font-size:0.72rem; color:var(--ink-soft); }
+  select.status-select{ font-size:0.72rem; padding:4px 6px; border-radius:6px; }
+  .link-strip{ display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+  .link-card{ display:flex; align-items:center; gap:6px; text-decoration:none; border:1px solid var(--border); border-radius:7px; overflow:hidden; background:rgba(255,255,255,0.4); max-width:190px; }
+  .link-card img{ width:48px; height:34px; object-fit:cover; display:block; }
+  .link-card .link-title{ font-size:0.7rem; color:var(--ink); padding:0 8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .link-card.generic{ padding:6px 9px; gap:5px; }
+
+  .link-input-row{ display:flex; gap:8px; }
+  .link-preview-row{ display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+  .link-preview-chip{ display:flex; align-items:center; gap:6px; border:1px solid var(--border); border-radius:7px; padding:4px 8px; font-size:0.72rem; background:rgba(255,255,255,0.5); }
+  .link-preview-chip img{ width:30px; height:20px; object-fit:cover; border-radius:3px; }
+  .link-preview-chip button{ background:none; border:none; color:var(--ink-soft); cursor:pointer; padding:0; }
+
+  .palette-picks{ display:flex; flex-wrap:wrap; gap:32px; justify-content:center; padding:26px; }
+  .palette-pick{ display:flex; flex-direction:column; align-items:center; gap:8px; }
+  .palette-swatch{ width:64px; height:64px; border-radius:50%; border:1px solid var(--border); }
+  .harmony-btn{ font-size:0.75rem; padding:6px 12px; border-radius:999px; border:1px solid var(--border); background:none; cursor:pointer; color:var(--ink-soft); }
+  .harmony-btn.active{ background:var(--plum); border-color:var(--plum); color:#fff; }
+
+  .brand-hint{ font-size:0.72rem; color:var(--ink-soft); margin-top:-6px; }
+  .note{ font-size:0.8rem; color:var(--ink-soft); }
+  ::selection{ background:#9B7EC055; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* =================================================================
+   Design tokens / constants
+================================================================= */
+const STATUS_COLORS = { Planned:'#6E6178', WIP:'#8B5FA3', Finished:'#3E6B49', Frogged:'#7A2F4B' };
+const CHART_COLORS = ['#3E6B49','#5C3A72','#9B7EC0','#8FAF7C','#6E6178'];
+const WEIGHTS = ["Lace","Fingering","Sport","DK","Worsted","Aran","Bulky","Super Bulky"];
+const STATUSES = ["Planned","WIP","Finished","Frogged"];
+const HARMONIES = ["Complementary","Analogous","Triadic","Split-Complementary"];
+
+/* Curated brand/line presets — approximate specs, always double-check the ball band.
+   Stored as a flat array (not nested) so it maps cleanly onto a Firestore array-of-maps
+   field, which is much easier to hand-edit in the Firebase console than nested maps.
+   This hardcoded list is only the fallback used before Firestore responds, or if the
+   Firestore read fails for any reason — see loadPresetsFromFirestore(). */
+let YARN_PRESETS = [
+  { brand:"Cascade Yarns", line:"220", fiber:"100% Peruvian Highland Wool", weightCategory:"Worsted", skeinWeightGrams:100, skeinYardage:220 },
+  { brand:"Cascade Yarns", line:"220 Superwash", fiber:"100% Superwash Wool", weightCategory:"Worsted", skeinWeightGrams:100, skeinYardage:220 },
+  { brand:"Cascade Yarns", line:"Heritage", fiber:"75% Superwash Merino Wool, 25% Nylon", weightCategory:"Fingering", skeinWeightGrams:100, skeinYardage:437 },
+  { brand:"Malabrigo", line:"Rios", fiber:"100% Superwash Merino Wool", weightCategory:"Worsted", skeinWeightGrams:100, skeinYardage:210 },
+  { brand:"Drops", line:"Nepal", fiber:"65% Wool, 35% Alpaca", weightCategory:"Aran", skeinWeightGrams:50, skeinYardage:82 },
+  { brand:"Lion Brand", line:"Wool-Ease", fiber:"80% Acrylic, 20% Wool", weightCategory:"Worsted", skeinWeightGrams:85, skeinYardage:197 },
+  { brand:"Lion Brand", line:"Wool-Ease Thick & Quick", fiber:"80% Acrylic, 20% Wool", weightCategory:"Super Bulky", skeinWeightGrams:170, skeinYardage:106 },
+  { brand:"Lion Brand", line:"24/7 Cotton", fiber:"100% Mercerized Cotton", weightCategory:"Worsted", skeinWeightGrams:100, skeinYardage:186 },
+  { brand:"Knit Picks", line:"Wool of the Andes Worsted", fiber:"100% Peruvian Highland Wool", weightCategory:"Worsted", skeinWeightGrams:50, skeinYardage:110 },
+  { brand:"Berroco", line:"Vintage", fiber:"52% Acrylic, 40% Wool, 8% Nylon", weightCategory:"Worsted", skeinWeightGrams:100, skeinYardage:218 },
+  { brand:"Red Heart", line:"Super Saver", fiber:"100% Acrylic", weightCategory:"Worsted", skeinWeightGrams:198, skeinYardage:364 }
+];
+function presetBrands(){ return [...new Set(YARN_PRESETS.map(p=>p.brand))]; }
+function presetLinesForBrand(brand){ return YARN_PRESETS.filter(p=>p.brand===brand); }
+function findPreset(brand,line){ return YARN_PRESETS.find(p=>p.brand===brand && p.line===line); }
+
+/* =================================================================
+   State
+================================================================= */
+let STATE = {
+  yarns: [],
+  projects: [],
+  tab: 'overview',
+  loading: true,
+  authChecked: false,
+  user: null,
+  showYarnForm: false,
+  showProjectForm: false,
+  paletteBaseId: null,
+  paletteHarmony: 'Complementary'
+};
+let pendingColorHex = '#5C3A72';
+let extractedSwatches = [];
+let pendingProjectYarnIds = [];
+let pendingProjectLinks = [];
+let fiberChartInstance = null;
+let statusChartInstance = null;
+
+/* =================================================================
+   Storage — Firebase Auth + Firestore.
+   window.FB is set up by the <script type="module"> block near the
+   bottom of <head>/<body> (see FIREBASE SETUP below). All calls here
+   go through that bridge so this script can stay a plain, non-module
+   script (needed for inline onclick="..." handlers to work).
+================================================================= */
+async function persist(){
+  if(!STATE.user) return;
+  try{
+    await window.FB.saveUserData(STATE.user.uid, { yarns: STATE.yarns, projects: STATE.projects });
+  }catch(e){
+    console.error('Save failed', e);
+    alert("Couldn't save to your account — check your connection and try again.");
+  }
+}
+async function loadPresetsFromFirestore(){
+  try{
+    const remote = await window.FB.loadPresets();
+    if(remote && Array.isArray(remote) && remote.length){ YARN_PRESETS = remote; return; }
+    // Nothing in Firestore yet — seed it once with the built-in defaults.
+    // The security rules only allow this "create" the very first time;
+    // after that the doc exists and further client writes are rejected,
+    // so editing afterward happens in the Firebase console.
+    await window.FB.seedPresetsIfEmpty(YARN_PRESETS);
+  }catch(e){
+    console.warn('Using built-in yarn presets (Firestore presets unavailable):', e);
+  }
+}
+
+/* =================================================================
+   Utilities
+================================================================= */
+function uid(){ return (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Math.random()).slice(2); }
+function todayStr(){ return new Date().toISOString().slice(0,10); }
+function daysBetween(a,b){ const d = Math.round((new Date(b) - new Date(a)) / 86400000); return Number.isFinite(d) ? d : null; }
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function yarnTotalYardage(y){ return (Number(y.skeinYardage)||0) * (Number(y.quantity)||1); }
+
+/* Color math */
+function hexToRgb(hex){
+  const m = (hex||'#999999').replace('#','');
+  const full = m.length===3 ? m.split('').map(c=>c+c).join('') : m;
+  const bigint = parseInt(full,16) || 0;
+  return [(bigint>>16)&255, (bigint>>8)&255, bigint&255];
+}
+function rgbToHex([r,g,b]){
+  return '#' + [r,g,b].map(v => Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join('');
+}
+function rgbToHsl([r,g,b]){
+  r/=255; g/=255; b/=255;
+  const max=Math.max(r,g,b), min=Math.min(r,g,b);
+  let h=0,s=0; const l=(max+min)/2;
+  if(max!==min){
+    const d=max-min;
+    s = l>0.5 ? d/(2-max-min) : d/(max+min);
+    switch(max){
+      case r: h=(g-b)/d + (g<b?6:0); break;
+      case g: h=(b-r)/d + 2; break;
+      default: h=(r-g)/d + 4;
+    }
+    h/=6;
+  }
+  return { h:h*360, s:s*100, l:l*100 };
+}
+function hexToHsl(hex){ return rgbToHsl(hexToRgb(hex)); }
+function hueDistance(a,b){ const d=Math.abs(a-b)%360; return d>180 ? 360-d : d; }
+
+function kMeansColors(pixels, k=5, iterations=6){
+  if(pixels.length===0) return [];
+  const kk = Math.min(k, pixels.length);
+  const centroids = [];
+  const step = Math.max(1, Math.floor(pixels.length/kk));
+  for(let i=0;i<kk;i++) centroids.push(pixels[Math.min(i*step, pixels.length-1)].slice());
+  let assignments = new Array(pixels.length).fill(0);
+  for(let iter=0; iter<iterations; iter++){
+    for(let i=0;i<pixels.length;i++){
+      let best=0, bestDist=Infinity;
+      for(let c=0;c<centroids.length;c++){
+        const dr = pixels[i][0]-centroids[c][0];
+        const dg = pixels[i][1]-centroids[c][1];
+        const db = pixels[i][2]-centroids[c][2];
+        const d = dr*dr+dg*dg+db*db;
+        if(d<bestDist){ bestDist=d; best=c; }
+      }
+      assignments[i]=best;
+    }
+    const sums = centroids.map(()=>[0,0,0,0]);
+    for(let i=0;i<pixels.length;i++){
+      const c = assignments[i];
+      sums[c][0]+=pixels[i][0]; sums[c][1]+=pixels[i][1]; sums[c][2]+=pixels[i][2]; sums[c][3]+=1;
+    }
+    for(let c=0;c<centroids.length;c++){
+      if(sums[c][3]>0) centroids[c] = [sums[c][0]/sums[c][3], sums[c][1]/sums[c][3], sums[c][2]/sums[c][3]];
+    }
+  }
+  const counts = new Array(centroids.length).fill(0);
+  assignments.forEach(a=>counts[a]++);
+  return centroids.map((c,i)=>({hex:rgbToHex(c), count:counts[i]}))
+    .filter(c=>c.count>0)
+    .sort((a,b)=>b.count-a.count);
+}
+
+function categorizeFiber(text){
+  const t = (text||'').toLowerCase();
+  const map = [
+    ["Wool",["wool","merino","shetland","lambswool"]],
+    ["Alpaca",["alpaca"]],
+    ["Cotton",["cotton"]],
+    ["Acrylic",["acrylic"]],
+    ["Silk",["silk"]],
+    ["Linen",["linen","flax"]],
+    ["Mohair",["mohair"]],
+    ["Cashmere",["cashmere"]],
+    ["Bamboo",["bamboo"]]
+  ];
+  for(const [label,keys] of map) if(keys.some(k=>t.includes(k))) return label;
+  if(!t.trim()) return "Unspecified";
+  return "Other / blend";
+}
+
+/* Icons (minimal hand-drawn line icons) */
+const ICONS = {
+  plus: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+  trash: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 6 7 20 7"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13"/><path d="M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/></svg>',
+  upload: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>',
+  reset: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 1 3 6.7"/><polyline points="3 17 3 21 7 21"/></svg>',
+  palette: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a9 9 0 1 0 0 18c1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H16a4 4 0 0 0 4-4c0-4.4-3.6-8-8-8z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="10.5" cy="7" r="1"/><circle cx="15" cy="7.5" r="1"/></svg>',
+  clipboard: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="4" width="10" height="16" rx="1"/><path d="M9 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1"/><path d="M9 10h6M9 14h6"/></svg>',
+  sparkles: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z"/><path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/></svg>',
+  package: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>',
+  link: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/></svg>'
+};
+
+/* =================================================================
+   Master render
+================================================================= */
+function render(){
+  const app = document.getElementById('app');
+
+  const headerRight = !STATE.authChecked ? ''
+    : STATE.user
+      ? `<div style="display:flex; align-items:center; gap:12px;">
+           <span class="note">${esc(STATE.user.displayName || STATE.user.email || 'Signed in')}</span>
+           <button class="btn btn-ghost btn-small" onclick="window.FB.signOutUser()">Sign out</button>
+           <button class="reset-btn" onclick="resetAll()">${ICONS.reset} Clear my data</button>
+         </div>`
+      : '';
+
+  app.innerHTML = `
+    <div class="wrap">
+      <header class="app-header">
+        <div>
+          <h1>Woolgather</h1>
+          <p>A quiet ledger for yarn, thread, and the projects they become.</p>
+        </div>
+        ${headerRight}
+      </header>
+      <div id="tab-content"></div>
+    </div>
+  `;
+
+  const content = document.getElementById('tab-content');
+
+  if(!STATE.authChecked){
+    content.innerHTML = `<p class="note">Connecting…</p>`;
+    return;
+  }
+  if(!STATE.user){
+    content.innerHTML = renderSignedOut();
+    return;
+  }
+
+  content.innerHTML = `
+    <nav class="tabs">
+      <button class="${STATE.tab==='overview'?'active':''}" onclick="switchTab('overview')">${ICONS.clipboard} Overview</button>
+      <button class="${STATE.tab==='stash'?'active':''}" onclick="switchTab('stash')">${ICONS.package} Stash</button>
+      <button class="${STATE.tab==='projects'?'active':''}" onclick="switchTab('projects')">${ICONS.sparkles} Projects</button>
+      <button class="${STATE.tab==='palette'?'active':''}" onclick="switchTab('palette')">${ICONS.palette} Palette lab</button>
+    </nav>
+    <div id="inner-tab-content"></div>
+  `;
+  renderTab();
+}
+
+function renderSignedOut(){
+  return `<div class="empty" style="margin-top:24px;">
+    <p class="title">Sign in to start your stash</p>
+    <p class="body">Your yarn, projects, and palettes are saved to your account and follow you to any browser or device you sign into — including friends you invite to use this.</p>
+    <button class="btn btn-primary" onclick="window.FB.signIn()">${ICONS.sparkles} Sign in with Google</button>
+  </div>`;
+}
+
+function renderTab(){
+  const el = document.getElementById('inner-tab-content');
+  if(!el) return;
+  if(STATE.tab==='overview') el.innerHTML = renderOverview();
+  else if(STATE.tab==='stash') el.innerHTML = renderStash();
+  else if(STATE.tab==='projects') el.innerHTML = renderProjects();
+  else if(STATE.tab==='palette') el.innerHTML = renderPalette();
+
+  if(STATE.tab==='overview') renderCharts();
+  if(STATE.tab==='stash' && STATE.showYarnForm) wireBrandSelectors();
+}
+
+function switchTab(tab){
+  STATE.tab = tab;
+  STATE.showYarnForm = false;
+  STATE.showProjectForm = false;
+  render();
+}
+
+async function resetAll(){
+  if(!STATE.user) return;
+  if(!confirm("Clear every yarn and project you've logged? This can't be undone.")) return;
+  STATE.yarns = [];
+  STATE.projects = [];
+  await persist();
+  render();
+}
+
+/* =================================================================
+   Overview
+================================================================= */
+function computeStats(){
+  const yarns = STATE.yarns, projects = STATE.projects;
+  const totalYardage = yarns.reduce((s,y)=>s+yarnTotalYardage(y),0);
+  const finished = projects.filter(p=>p.status==='Finished');
+  const usedYardage = finished.reduce((s,p)=>s+(Number(p.yardageUsed)||0),0);
+  const utilization = totalYardage>0 ? Math.min(100,(usedYardage/totalYardage)*100) : 0;
+  const wip = projects.filter(p=>p.status==='WIP');
+  const oldestWip = wip.reduce((old,p)=> (!old || new Date(p.startDate) < new Date(old.startDate)) ? p : old, null);
+  const oldestWipDays = oldestWip ? daysBetween(oldestWip.startDate, todayStr()) : null;
+  const finishedWithDates = finished.filter(p=>p.startDate && p.finishDate);
+  const avgFinishDays = finishedWithDates.length
+    ? Math.round(finishedWithDates.reduce((s,p)=>s+daysBetween(p.startDate,p.finishDate),0)/finishedWithDates.length)
+    : null;
+  const usedYarnIds = new Set();
+  projects.forEach(p=>(p.yarnIds||[]).forEach(id=>usedYarnIds.add(id)));
+  const unused = yarns.filter(y=>!usedYarnIds.has(y.id));
+  const avgUnusedAge = unused.length
+    ? Math.round(unused.reduce((s,y)=>s+(daysBetween(y.dateAdded, todayStr())||0),0)/unused.length)
+    : null;
+  const fiberMap = {};
+  yarns.forEach(y=>{ const cat = categorizeFiber(y.fiber); fiberMap[cat] = (fiberMap[cat]||0) + yarnTotalYardage(y); });
+  const fiberData = Object.entries(fiberMap).map(([fiber,yards])=>({fiber, yards:Math.round(yards)})).sort((a,b)=>b.yards-a.yards);
+  const statusCounts = {};
+  projects.forEach(p=>{ statusCounts[p.status] = (statusCounts[p.status]||0)+1; });
+  const statusData = Object.entries(statusCounts).map(([name,value])=>({name,value}));
+  return { totalYardage, utilization, wipCount:wip.length, oldestWipDays, avgFinishDays, unused, avgUnusedAge, fiberData, statusData };
+}
+
+function renderOverview(){
+  if(STATE.yarns.length===0 && STATE.projects.length===0){
+    return `<div class="empty">
+      <p class="title">Nothing logged yet</p>
+      <p class="body">Add a few skeins to your stash to start seeing where your yardage, fibers, and colors actually go.</p>
+      <button class="btn btn-primary" onclick="switchTab('stash')">${ICONS.plus} Add your first yarn</button>
+    </div>`;
+  }
+  const s = computeStats();
+  let html = `<div class="stat-grid">
+    ${statTile('Yarns logged', STATE.yarns.length)}
+    ${statTile('Total yardage', Math.round(s.totalYardage).toLocaleString())}
+    ${statTile('Stash used', s.utilization.toFixed(0)+'%', 'in finished projects')}
+    ${statTile('In progress', s.wipCount)}
+    ${statTile('Oldest WIP', s.oldestWipDays!=null ? s.oldestWipDays+'d' : '—')}
+    ${statTile('Avg. time to finish', s.avgFinishDays!=null ? s.avgFinishDays+'d' : '—')}
+  </div>
+  <div class="chart-grid">
+    <div class="card chart-card">
+      <p class="chart-title">Yardage owned by fiber</p>
+      ${s.fiberData.length ? '<div class="chart-holder"><canvas id="fiberChart"></canvas></div>' : '<p class="note">Add some yarn to see this.</p>'}
+    </div>
+    <div class="card chart-card">
+      <p class="chart-title">Projects by status</p>
+      ${s.statusData.length ? '<div class="chart-holder"><canvas id="statusChart"></canvas></div>' : '<p class="note">Log a project to see this.</p>'}
+    </div>
+  </div>`;
+  if(s.unused.length>0){
+    html += `<div class="card note" style="margin-top:4px;">
+      <strong style="color:var(--ink);">${s.unused.length}</strong> skein${s.unused.length===1?'':'s'} in your stash
+      ${s.unused.length===1?"hasn't":"haven't"} been used in a project yet${s.avgUnusedAge!=null ? ` — sitting there for ${s.avgUnusedAge} days on average.` : '.'}
+    </div>`;
+  }
+  return html;
+}
+function statTile(label,value,sub){
+  return `<div class="card stat-tile"><p class="label">${esc(label)}</p><p class="value">${esc(value)}</p>${sub?`<p class="sub">${esc(sub)}</p>`:''}</div>`;
+}
+
+function renderCharts(){
+  const s = computeStats();
+  if(typeof Chart === 'undefined') return;
+  Chart.defaults.font.family = "'Work Sans', sans-serif";
+  Chart.defaults.color = '#6E6178';
+
+  const fiberCanvas = document.getElementById('fiberChart');
+  if(fiberCanvas && s.fiberData.length){
+    if(fiberChartInstance) fiberChartInstance.destroy();
+    fiberChartInstance = new Chart(fiberCanvas, {
+      type:'bar',
+      data:{ labels:s.fiberData.map(d=>d.fiber), datasets:[{ data:s.fiberData.map(d=>d.yards), backgroundColor: s.fiberData.map((_,i)=>CHART_COLORS[i%CHART_COLORS.length]), borderRadius:4 }] },
+      options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label:(ctx)=>ctx.parsed.x+' yd' } } },
+        scales:{ x:{ grid:{display:false} }, y:{ grid:{display:false} } } }
+    });
+  }
+  const statusCanvas = document.getElementById('statusChart');
+  if(statusCanvas && s.statusData.length){
+    if(statusChartInstance) statusChartInstance.destroy();
+    statusChartInstance = new Chart(statusCanvas, {
+      type:'doughnut',
+      data:{ labels:s.statusData.map(d=>d.name), datasets:[{ data:s.statusData.map(d=>d.value), backgroundColor:s.statusData.map(d=>STATUS_COLORS[d.name]||'#6E6178'), borderWidth:2, borderColor:'#F1EEF3' }] },
+      options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ boxWidth:10, font:{size:11} } } } }
+    });
+  }
+}
+
+/* =================================================================
+   Stash
+================================================================= */
+function renderStash(){
+  let html = `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+    <p class="note">${STATE.yarns.length} skein${STATE.yarns.length===1?'':'s'} logged</p>
+    ${!STATE.showYarnForm ? `<button class="btn btn-primary" onclick="showYarnForm()">${ICONS.plus} Add yarn</button>` : ''}
+  </div>`;
+  if(STATE.showYarnForm) html += renderYarnForm();
+  if(STATE.yarns.length===0){
+    html += `<div class="empty"><p class="title">Your stash is empty</p><p class="body">Log a skein — its color, fiber, and yardage — and it'll start showing up across the app.</p></div>`;
+  } else {
+    html += `<div class="yarn-grid">${STATE.yarns.map(renderYarnCard).join('')}</div>`;
+  }
+  return html;
+}
+
+function showYarnForm(){ STATE.showYarnForm = true; pendingColorHex = '#5C3A72'; extractedSwatches = []; renderTab(); }
+function hideYarnForm(){ STATE.showYarnForm = false; renderTab(); }
+
+function renderYarnForm(){
+  const brandOptions = presetBrands().map(b=>`<option value="${esc(b)}">${esc(b)}</option>`).join('');
+  return `
+  <form class="card form-grid" onsubmit="handleAddYarn(event)" style="margin-bottom:22px;">
+    <label class="field">Brand preset (optional)
+      <select id="yf-brand-select" onchange="onBrandChange()">
+        <option value="">Custom / other</option>
+        ${brandOptions}
+      </select>
+    </label>
+    <label class="field">Line
+      <select id="yf-line-select" onchange="onLineChange()" disabled><option value="">— pick a brand first —</option></select>
+    </label>
+
+    <label class="field">Name
+      <input id="yf-name" required placeholder="Malabrigo Rios" />
+    </label>
+    <label class="field">Colorway
+      <input id="yf-colorway" placeholder="Ravelry Red" />
+    </label>
+
+    <label class="field">Fiber content
+      <input id="yf-fiber" placeholder="100% superwash merino" />
+    </label>
+    <label class="field">Weight category
+      <select id="yf-weightcat">${WEIGHTS.map(w=>`<option ${w==='Worsted'?'selected':''}>${w}</option>`).join('')}</select>
+    </label>
+
+    <label class="field">Skein weight (g)
+      <input id="yf-skeinweight" type="number" min="0" placeholder="100" />
+    </label>
+    <label class="field">Yardage per skein
+      <input id="yf-skeinyardage" type="number" min="0" placeholder="220" />
+    </label>
+
+    <label class="field">Quantity (skeins)
+      <input id="yf-quantity" type="number" min="1" value="1" />
+    </label>
+    <label class="field">Cost per skein (optional)
+      <input id="yf-cost" type="number" min="0" step="0.01" />
+    </label>
+
+    <div class="span2" style="display:flex; flex-wrap:wrap; align-items:center; gap:14px;">
+      <label class="field">Color
+        <input id="yf-colorhex" type="color" value="${pendingColorHex}" onchange="pendingColorHex=this.value" />
+      </label>
+      <div style="flex:1; min-width:220px;">
+        <span class="note" style="display:block; margin-bottom:4px;">Or extract from a photo</span>
+        <button type="button" class="btn btn-ghost btn-small" onclick="document.getElementById('yf-photo').click()">${ICONS.upload} Upload photo</button>
+        <input id="yf-photo" type="file" accept="image/*" style="display:none" onchange="handlePhotoUpload(event)" />
+        <span id="yf-extracting" class="note" style="display:none; margin-left:8px;">Clustering colors…</span>
+        <div id="yf-swatches" class="swatch-row"></div>
+      </div>
+    </div>
+
+    <div class="span2" style="display:flex; gap:8px; justify-content:flex-end;">
+      <button type="button" class="btn btn-ghost" onclick="hideYarnForm()">Cancel</button>
+      <button type="submit" class="btn btn-primary">Add to stash</button>
+    </div>
+  </form>`;
+}
+
+function wireBrandSelectors(){ /* placeholder in case future wiring needed after render */ }
+
+function onBrandChange(){
+  const brand = document.getElementById('yf-brand-select').value;
+  const lineSelect = document.getElementById('yf-line-select');
+  if(!brand){
+    lineSelect.innerHTML = '<option value="">— pick a brand first —</option>';
+    lineSelect.disabled = true;
+    return;
+  }
+  const lines = presetLinesForBrand(brand);
+  lineSelect.innerHTML = '<option value="">— pick a line —</option>' + lines.map(p=>`<option value="${esc(p.line)}">${esc(p.line)}</option>`).join('');
+  lineSelect.disabled = false;
+}
+function onLineChange(){
+  const brand = document.getElementById('yf-brand-select').value;
+  const line = document.getElementById('yf-line-select').value;
+  if(!brand || !line) return;
+  const preset = findPreset(brand, line);
+  if(!preset) return;
+  document.getElementById('yf-name').value = `${brand} ${line}`;
+  document.getElementById('yf-fiber').value = preset.fiber;
+  document.getElementById('yf-weightcat').value = preset.weightCategory;
+  document.getElementById('yf-skeinweight').value = preset.skeinWeightGrams;
+  document.getElementById('yf-skeinyardage').value = preset.skeinYardage;
+}
+
+function handlePhotoUpload(e){
+  const file = e.target.files[0];
+  if(!file) return;
+  document.getElementById('yf-extracting').style.display = 'inline';
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  img.onload = () => {
+    const size = 50;
+    const canvas = document.createElement('canvas');
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, size, size);
+    const data = ctx.getImageData(0,0,size,size).data;
+    const pixels = [];
+    for(let i=0;i<data.length;i+=4){ if(data[i+3] < 100) continue; pixels.push([data[i],data[i+1],data[i+2]]); }
+    extractedSwatches = kMeansColors(pixels, 5, 6).slice(0,5);
+    document.getElementById('yf-extracting').style.display = 'none';
+    renderSwatchRow();
+    URL.revokeObjectURL(url);
+  };
+  img.src = url;
+}
+function renderSwatchRow(){
+  const el = document.getElementById('yf-swatches');
+  if(!el) return;
+  el.innerHTML = extractedSwatches.map(s=>`<button type="button" class="swatch-btn ${pendingColorHex===s.hex?'selected':''}" style="background:${s.hex}" title="${s.hex}" onclick="pickSwatch('${s.hex}')"></button>`).join('');
+}
+function pickSwatch(hex){
+  pendingColorHex = hex;
+  document.getElementById('yf-colorhex').value = hex;
+  renderSwatchRow();
+}
+
+function handleAddYarn(e){
+  e.preventDefault();
+  const name = document.getElementById('yf-name').value.trim();
+  if(!name) return;
+  const yarn = {
+    id: uid(),
+    name,
+    colorway: document.getElementById('yf-colorway').value.trim(),
+    fiber: document.getElementById('yf-fiber').value.trim(),
+    weightCategory: document.getElementById('yf-weightcat').value,
+    skeinWeightGrams: Number(document.getElementById('yf-skeinweight').value) || 0,
+    skeinYardage: Number(document.getElementById('yf-skeinyardage').value) || 0,
+    quantity: Number(document.getElementById('yf-quantity').value) || 1,
+    cost: document.getElementById('yf-cost').value === '' ? null : Number(document.getElementById('yf-cost').value),
+    colorHex: pendingColorHex,
+    dateAdded: todayStr()
+  };
+  yarn.yardageRemaining = yarnTotalYardage(yarn);
+  STATE.yarns.push(yarn);
+  persist();
+  STATE.showYarnForm = false;
+  renderTab();
+}
+
+function deleteYarn(id){
+  STATE.yarns = STATE.yarns.filter(y=>y.id!==id);
+  persist();
+  renderTab();
+}
+function changeRemaining(id, val){
+  const n = val==='' ? 0 : Number(val);
+  STATE.yarns = STATE.yarns.map(y => y.id===id ? {...y, yardageRemaining:n} : y);
+  persist();
+}
+
+function renderYarnCard(y){
+  const total = yarnTotalYardage(y);
+  const subtitle = y.colorway ? esc(y.colorway) : '';
+  return `<div class="card yarn-card">
+    <div class="yarn-hole"></div>
+    <div class="yarn-top">
+      <div class="yarn-swatch-name">
+        <span class="swatch" style="background:${y.colorHex}"></span>
+        <div style="min-width:0;">
+          <p class="yarn-name">${esc(y.name)}</p>
+          ${subtitle ? `<p class="yarn-sub">${subtitle}</p>` : ''}
+        </div>
+      </div>
+      <button class="del-btn" onclick="deleteYarn('${y.id}')" aria-label="Remove yarn">${ICONS.trash}</button>
+    </div>
+    <div class="yarn-meta">
+      <span>${esc(categorizeFiber(y.fiber))}</span>
+      <span>${esc(y.weightCategory||'')}</span>
+    </div>
+    <div class="yarn-bottom">
+      <span>
+        <input type="number" value="${y.yardageRemaining}" onchange="changeRemaining('${y.id}', this.value)" />
+        / ${total} yd <span class="note">(${y.quantity}× ${y.skeinYardage}yd)</span>
+      </span>
+      ${y.cost ? `<span class="note">$${(Number(y.cost)*y.quantity).toFixed(2)}</span>` : ''}
+    </div>
+  </div>`;
+}
+
+/* =================================================================
+   Projects
+================================================================= */
+function renderProjects(){
+  const wip = STATE.projects.filter(p=>p.status==='WIP');
+  let html = `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+    <p class="note">${STATE.projects.length} project${STATE.projects.length===1?'':'s'} · ${wip.length} in progress</p>
+    ${!STATE.showProjectForm ? `<button class="btn btn-primary" onclick="showProjectForm()">${ICONS.plus} Add project</button>` : ''}
+  </div>`;
+  if(STATE.showProjectForm) html += renderProjectForm();
+  if(STATE.projects.length===0){
+    html += `<div class="empty"><p class="title">No projects yet</p><p class="body">Log a project — planned, in progress, or finished — and link the yarn (and videos or blog posts) you're using.</p></div>`;
+  } else {
+    html += `<div class="card">${STATE.projects.map(renderProjectRow).join('')}</div>`;
+  }
+  return html;
+}
+
+function showProjectForm(){
+  STATE.showProjectForm = true;
+  pendingProjectYarnIds = [];
+  pendingProjectLinks = [];
+  renderTab();
+}
+function hideProjectForm(){ STATE.showProjectForm = false; renderTab(); }
+
+function renderProjectForm(){
+  const yarnPicker = STATE.yarns.length===0
+    ? `<p class="note">Add yarn to your stash first to link it here.</p>`
+    : `<div class="yarn-picker">${STATE.yarns.map(y=>`
+        <button type="button" class="yarn-chip ${pendingProjectYarnIds.includes(y.id)?'checked':''}" onclick="toggleProjectYarn('${y.id}')">
+          <span class="dot" style="background:${y.colorHex}"></span>${esc(y.name)}
+        </button>`).join('')}</div>`;
+
+  return `
+  <form class="card form-grid" onsubmit="handleAddProject(event)" style="margin-bottom:22px;">
+    <label class="field">Project name
+      <input id="pf-name" required placeholder="Gift cowl for Dana" />
+    </label>
+    <label class="field">Pattern (optional)
+      <input id="pf-pattern" />
+    </label>
+    <label class="field">Status
+      <select id="pf-status">${STATUSES.map(s=>`<option>${s}</option>`).join('')}</select>
+    </label>
+    <label class="field">Yardage used (optional)
+      <input id="pf-yardageused" type="number" min="0" />
+    </label>
+    <label class="field">Start date
+      <input id="pf-startdate" type="date" value="${todayStr()}" />
+    </label>
+    <label class="field">Finish date (optional)
+      <input id="pf-finishdate" type="date" />
+    </label>
+
+    <div class="span2">
+      <span class="note" style="display:block; margin-bottom:6px;">Yarns used</span>
+      ${yarnPicker}
+    </div>
+
+    <div class="span2">
+      <span class="note" style="display:block; margin-bottom:6px;">Links (pattern, YouTube tutorial, blog post…)</span>
+      <div class="link-input-row">
+        <input id="pf-link-url" placeholder="https://youtube.com/watch?v=..." style="flex:1;" />
+        <button type="button" class="btn btn-ghost btn-small" onclick="addProjectLink()">${ICONS.link} Add link</button>
+      </div>
+      <div id="pf-link-previews" class="link-preview-row"></div>
+    </div>
+
+    <div class="span2" style="display:flex; gap:8px; justify-content:flex-end;">
+      <button type="button" class="btn btn-ghost" onclick="hideProjectForm()">Cancel</button>
+      <button type="submit" class="btn btn-primary">Add project</button>
+    </div>
+  </form>`;
+}
+
+function toggleProjectYarn(id){
+  pendingProjectYarnIds = pendingProjectYarnIds.includes(id)
+    ? pendingProjectYarnIds.filter(x=>x!==id)
+    : [...pendingProjectYarnIds, id];
+  renderTab();
+}
+
+async function addProjectLink(){
+  const input = document.getElementById('pf-link-url');
+  const url = (input.value||'').trim();
+  if(!url) return;
+  input.value = '';
+  let parsed;
+  try{ parsed = new URL(url); }catch(e){ return; }
+  const yt = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{6,})/i);
+  const vim = url.match(/vimeo\.com\/(\d+)/i);
+  const linkObj = { id:uid(), url, type: yt?'youtube':vim?'vimeo':'link', title:parsed.hostname.replace('www.',''), thumbnail:null };
+  pendingProjectLinks.push(linkObj);
+  renderLinkPreviews();
+  try{
+    if(yt){
+      const r = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`);
+      if(r.ok){ const data = await r.json(); linkObj.title = data.title; linkObj.thumbnail = data.thumbnail_url; }
+    } else if(vim){
+      const r = await fetch(`https://vimeo.com/api/oembed.json?url=${encodeURIComponent(url)}`);
+      if(r.ok){ const data = await r.json(); linkObj.title = data.title; linkObj.thumbnail = data.thumbnail_url; }
+    }
+  }catch(err){ /* fall back to hostname title already set */ }
+  renderLinkPreviews();
+}
+function removePendingLink(id){
+  pendingProjectLinks = pendingProjectLinks.filter(l=>l.id!==id);
+  renderLinkPreviews();
+}
+function renderLinkPreviews(){
+  const el = document.getElementById('pf-link-previews');
+  if(!el) return;
+  el.innerHTML = pendingProjectLinks.map(l => `
+    <span class="link-preview-chip">
+      ${l.thumbnail ? `<img src="${esc(l.thumbnail)}" alt="" />` : ''}
+      ${esc(l.title)}
+      <button type="button" onclick="removePendingLink('${l.id}')">✕</button>
+    </span>`).join('');
+}
+
+function handleAddProject(e){
+  e.preventDefault();
+  const name = document.getElementById('pf-name').value.trim();
+  if(!name) return;
+  const proj = {
+    id: uid(),
+    name,
+    patternName: document.getElementById('pf-pattern').value.trim(),
+    status: document.getElementById('pf-status').value,
+    startDate: document.getElementById('pf-startdate').value || todayStr(),
+    finishDate: document.getElementById('pf-finishdate').value || null,
+    yardageUsed: document.getElementById('pf-yardageused').value === '' ? null : Number(document.getElementById('pf-yardageused').value),
+    yarnIds: [...pendingProjectYarnIds],
+    links: pendingProjectLinks.map(l=>({ id:l.id, url:l.url, type:l.type, title:l.title, thumbnail:l.thumbnail })),
+    createdAt: todayStr()
+  };
+  STATE.projects.push(proj);
+  persist();
+  STATE.showProjectForm = false;
+  renderTab();
+}
+
+function deleteProject(id){
+  STATE.projects = STATE.projects.filter(p=>p.id!==id);
+  persist();
+  renderTab();
+}
+function updateProjectStatus(id, status){
+  STATE.projects = STATE.projects.map(p => p.id===id ? {...p, status} : p);
+  persist();
+  renderTab();
+}
+
+function renderProjectRow(p){
+  const usedYarns = STATE.yarns.filter(y => (p.yarnIds||[]).includes(y.id));
+  const daysActive = p.status==='WIP' ? daysBetween(p.startDate, todayStr()) : null;
+  const linkStrip = (p.links||[]).length ? `<div class="link-strip">${p.links.map(l => l.thumbnail
+      ? `<a class="link-card" href="${esc(l.url)}" target="_blank" rel="noopener"><img src="${esc(l.thumbnail)}" alt=""/><span class="link-title">${esc(l.title)}</span></a>`
+      : `<a class="link-card generic" href="${esc(l.url)}" target="_blank" rel="noopener">${ICONS.link}<span class="link-title">${esc(l.title)}</span></a>`
+    ).join('')}</div>` : '';
+  return `<div class="project-row">
+    <span class="status-dot" style="background:${STATUS_COLORS[p.status]}"></span>
+    <div style="flex:1; min-width:0;">
+      <p class="project-name">${esc(p.name)}${p.patternName ? ` <span class="pattern">— ${esc(p.patternName)}</span>` : ''}</p>
+      <div class="project-meta">
+        ${usedYarns.map(y=>`<span class="dot" style="background:${y.colorHex}" title="${esc(y.name)}"></span>`).join('')}
+        ${daysActive!=null ? `<span class="days">${daysActive}d in progress</span>` : ''}
+      </div>
+      ${linkStrip}
+    </div>
+    <select class="status-select" onchange="updateProjectStatus('${p.id}', this.value)">
+      ${STATUSES.map(s=>`<option ${s===p.status?'selected':''}>${s}</option>`).join('')}
+    </select>
+    <button class="del-btn" onclick="deleteProject('${p.id}')" aria-label="Delete project">${ICONS.trash}</button>
+  </div>`;
+}
+
+/* =================================================================
+   Palette lab
+================================================================= */
+function getHarmonyRoles(baseHue, type){
+  switch(type){
+    case 'Complementary': return [{role:'Complement', hue:(baseHue+180)%360}];
+    case 'Analogous': return [{role:'Analogous −30°', hue:(baseHue+330)%360}, {role:'Analogous +30°', hue:(baseHue+30)%360}];
+    case 'Triadic': return [{role:'Triad', hue:(baseHue+120)%360}, {role:'Triad', hue:(baseHue+240)%360}];
+    case 'Split-Complementary': return [{role:'Split', hue:(baseHue+150)%360}, {role:'Split', hue:(baseHue+210)%360}];
+    default: return [];
+  }
+}
+function suggestPalette(yarns, baseYarn, type){
+  const baseHue = hexToHsl(baseYarn.colorHex).h;
+  const roles = getHarmonyRoles(baseHue, type);
+  const chosen = new Set([baseYarn.id]);
+  return roles.map(r=>{
+    let best=null, bestD=Infinity;
+    yarns.forEach(y=>{
+      if(chosen.has(y.id)) return;
+      const d = hueDistance(hexToHsl(y.colorHex).h, r.hue);
+      if(d<bestD){ bestD=d; best=y; }
+    });
+    if(best) chosen.add(best.id);
+    return {...r, yarn:best, distance: best ? Math.round(bestD) : null};
+  });
+}
+
+function renderPalette(){
+  const colored = STATE.yarns.filter(y=>y.colorHex);
+  if(colored.length < 2){
+    return `<div class="empty"><p class="title">Add a few more colors</p><p class="body">The palette lab matches color-theory harmonies against yarn you actually own. Log at least two colored skeins in your stash to try it.</p></div>`;
+  }
+  if(!STATE.paletteBaseId || !colored.find(y=>y.id===STATE.paletteBaseId)) STATE.paletteBaseId = colored[0].id;
+  const base = colored.find(y=>y.id===STATE.paletteBaseId);
+  const results = suggestPalette(colored, base, STATE.paletteHarmony);
+
+  const picks = `<div class="palette-pick">
+      <span class="palette-swatch" style="background:${base.colorHex}"></span>
+      <p style="margin:0; font-weight:500; font-size:0.85rem;">${esc(base.name)}</p>
+      <p class="note" style="margin:0;">Base</p>
+    </div>` + results.filter(r=>r.yarn).map(r=>`
+    <div class="palette-pick">
+      <span class="palette-swatch" style="background:${r.yarn.colorHex}"></span>
+      <p style="margin:0; font-weight:500; font-size:0.85rem;">${esc(r.yarn.name)}</p>
+      <p class="note" style="margin:0;">${esc(r.role)}${r.distance!=null ? ' · '+r.distance+'° off' : ''}</p>
+    </div>`).join('');
+
+  const stretched = results.some(r=>r.distance!=null && r.distance>35);
+
+  return `
+  <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end; margin-bottom:18px;">
+    <label class="field">Base yarn
+      <select onchange="STATE.paletteBaseId=this.value; renderTab();">
+        ${colored.map(y=>`<option value="${y.id}" ${y.id===base.id?'selected':''}>${esc(y.name)}</option>`).join('')}
+      </select>
+    </label>
+    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+      ${HARMONIES.map(h=>`<button class="harmony-btn ${STATE.paletteHarmony===h?'active':''}" onclick="STATE.paletteHarmony='${h}'; renderTab();">${h}</button>`).join('')}
+    </div>
+  </div>
+  <div class="card palette-picks">${picks}</div>
+  ${stretched ? `<p class="note" style="margin-top:14px;">Your stash doesn't have a close match for every slot in this harmony — the closest options above are a bit of a stretch. Might be a sign it's time to add to the stash, or try a different harmony.</p>` : ''}
+  `;
+}
+
+/* =================================================================
+   Init — waits for the Firebase bridge (window.FB) to be ready,
+   then reacts to sign-in / sign-out for as long as the page is open.
+================================================================= */
+function initApp(){
+  render(); // shows "Connecting…"
+
+  window.FB.onAuthChange(async (user) => {
+    STATE.authChecked = true;
+    STATE.user = user || null;
+
+    if(user){
+      try{
+        const data = await window.FB.loadUserData(user.uid);
+        STATE.yarns = (data && data.yarns) || [];
+        STATE.projects = (data && data.projects) || [];
+      }catch(e){
+        console.error('Could not load your data', e);
+        STATE.yarns = [];
+        STATE.projects = [];
+      }
+      await loadPresetsFromFirestore();
+    } else {
+      STATE.yarns = [];
+      STATE.projects = [];
+    }
+    render();
+  });
+}
+
+if(window.FB){ initApp(); }
+else { window.addEventListener('firebase-ready', initApp, { once:true }); }
+</script>
+</body>
+</html>

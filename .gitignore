@@ -2,4 +2,5 @@
 *.icloud
 .env
 spotify_monthly/.env
+spotify_monthly/get-token.js
 .DS_Store
