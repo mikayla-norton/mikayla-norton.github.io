@@ -244,6 +244,8 @@ let STATE = {
   user: null,
   showYarnForm: false,
   showProjectForm: false,
+  editingYarnId: null,
+  editingProjectId: null,
   paletteBaseId: null,
   paletteHarmony: 'Complementary'
 };
@@ -292,6 +294,7 @@ function todayStr(){ return new Date().toISOString().slice(0,10); }
 function daysBetween(a,b){ const d = Math.round((new Date(b) - new Date(a)) / 86400000); return Number.isFinite(d) ? d : null; }
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function yarnTotalYardage(y){ return (Number(y.skeinYardage)||0) * (Number(y.quantity)||1); }
+function yarnStatus(y){ return y.status || 'available'; }
 
 /* Color math */
 function hexToRgb(hex){
@@ -385,7 +388,9 @@ const ICONS = {
   clipboard: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="4" width="10" height="16" rx="1"/><path d="M9 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1"/><path d="M9 10h6M9 14h6"/></svg>',
   sparkles: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z"/><path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/></svg>',
   package: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>',
-  link: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/></svg>'
+  link: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/></svg>',
+  pencil: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+  bookmark: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>'
 };
 
 /* =================================================================
@@ -460,9 +465,8 @@ function renderTab(){
 }
 
 function switchTab(tab){
+  cleanupOpenForms();
   STATE.tab = tab;
-  STATE.showYarnForm = false;
-  STATE.showProjectForm = false;
   render();
 }
 
@@ -493,9 +497,10 @@ function computeStats(){
     : null;
   const usedYarnIds = new Set();
   projects.forEach(p=>(p.yarnIds||[]).forEach(id=>usedYarnIds.add(id)));
-  const unused = yarns.filter(y=>!usedYarnIds.has(y.id));
-  const avgUnusedAge = unused.length
-    ? Math.round(unused.reduce((s,y)=>s+(daysBetween(y.dateAdded, todayStr())||0),0)/unused.length)
+  const unused = yarns.filter(y=>!usedYarnIds.has(y.id) && yarnStatus(y)!=='allocated');
+  const unusedWithDate = unused.filter(y=>y.purchaseDate);
+  const avgUnusedAge = unusedWithDate.length
+    ? Math.round(unusedWithDate.reduce((s,y)=>s+(daysBetween(y.purchaseDate, todayStr())||0),0)/unusedWithDate.length)
     : null;
   const fiberMap = {};
   yarns.forEach(y=>{ const cat = categorizeFiber(y.fiber); fiberMap[cat] = (fiberMap[cat]||0) + yarnTotalYardage(y); });
@@ -503,7 +508,7 @@ function computeStats(){
   const statusCounts = {};
   projects.forEach(p=>{ statusCounts[p.status] = (statusCounts[p.status]||0)+1; });
   const statusData = Object.entries(statusCounts).map(([name,value])=>({name,value}));
-  return { totalYardage, utilization, wipCount:wip.length, oldestWipDays, avgFinishDays, unused, avgUnusedAge, fiberData, statusData };
+  return { totalYardage, utilization, wipCount:wip.length, oldestWipDays, avgFinishDays, unused, unusedWithDateCount:unusedWithDate.length, avgUnusedAge, fiberData, statusData };
 }
 
 function renderOverview(){
@@ -536,7 +541,7 @@ function renderOverview(){
   if(s.unused.length>0){
     html += `<div class="card note" style="margin-top:4px;">
       <strong style="color:var(--ink);">${s.unused.length}</strong> skein${s.unused.length===1?'':'s'} in your stash
-      ${s.unused.length===1?"hasn't":"haven't"} been used in a project yet${s.avgUnusedAge!=null ? ` — sitting there for ${s.avgUnusedAge} days on average.` : '.'}
+      ${s.unused.length===1?"hasn't":"haven't"} been used in a project yet${s.avgUnusedAge!=null ? ` — sitting there for ${s.avgUnusedAge} days on average (based on ${s.unusedWithDateCount} with a purchase date logged).` : '.'}
     </div>`;
   }
   return html;
@@ -590,13 +595,23 @@ function renderStash(){
   return html;
 }
 
-function showYarnForm(){ STATE.showYarnForm = true; pendingColorHex = '#5C3A72'; extractedSwatches = []; renderTab(); }
-function hideYarnForm(){ STATE.showYarnForm = false; renderTab(); }
+function showYarnForm(id){
+  STATE.showYarnForm = true;
+  STATE.editingYarnId = id || null;
+  const editing = id ? STATE.yarns.find(y=>y.id===id) : null;
+  pendingColorHex = editing ? editing.colorHex : '#5C3A72';
+  extractedSwatches = [];
+  renderTab();
+}
+function hideYarnForm(){ cleanupOpenForms(); renderTab(); }
 
 function renderYarnForm(){
+  const editing = STATE.editingYarnId ? STATE.yarns.find(y=>y.id===STATE.editingYarnId) : null;
+  const v = (field, fallback='') => editing ? esc(editing[field] ?? fallback) : fallback;
   const brandOptions = presetBrands().map(b=>`<option value="${esc(b)}">${esc(b)}</option>`).join('');
   return `
-  <form class="card form-grid" onsubmit="handleAddYarn(event)" style="margin-bottom:22px;">
+  <form class="card form-grid" onsubmit="handleSaveYarn(event)" style="margin-bottom:22px;">
+    ${editing ? '' : `
     <label class="field">Brand preset (optional)
       <select id="yf-brand-select" onchange="onBrandChange()">
         <option value="">Custom / other</option>
@@ -605,35 +620,40 @@ function renderYarnForm(){
     </label>
     <label class="field">Line
       <select id="yf-line-select" onchange="onLineChange()" disabled><option value="">— pick a brand first —</option></select>
-    </label>
+    </label>`}
 
     <label class="field">Name
-      <input id="yf-name" required placeholder="Malabrigo Rios" />
+      <input id="yf-name" required placeholder="Malabrigo Rios" value="${v('name')}" />
     </label>
     <label class="field">Colorway
-      <input id="yf-colorway" placeholder="Ravelry Red" />
+      <input id="yf-colorway" placeholder="Ravelry Red" value="${v('colorway')}" />
     </label>
 
     <label class="field">Fiber content
-      <input id="yf-fiber" placeholder="100% superwash merino" />
+      <input id="yf-fiber" placeholder="100% superwash merino" value="${v('fiber')}" />
     </label>
     <label class="field">Weight category
-      <select id="yf-weightcat">${WEIGHTS.map(w=>`<option ${w==='Worsted'?'selected':''}>${w}</option>`).join('')}</select>
+      <select id="yf-weightcat">${WEIGHTS.map(w=>`<option ${(editing?editing.weightCategory===w:w==='Worsted')?'selected':''}>${w}</option>`).join('')}</select>
     </label>
 
     <label class="field">Skein weight (g)
-      <input id="yf-skeinweight" type="number" min="0" placeholder="100" />
+      <input id="yf-skeinweight" type="number" min="0" placeholder="100" value="${v('skeinWeightGrams')}" />
     </label>
     <label class="field">Yardage per skein
-      <input id="yf-skeinyardage" type="number" min="0" placeholder="220" />
+      <input id="yf-skeinyardage" type="number" min="0" placeholder="220" value="${v('skeinYardage')}" />
     </label>
 
     <label class="field">Quantity (skeins)
-      <input id="yf-quantity" type="number" min="1" value="1" />
+      <input id="yf-quantity" type="number" min="1" value="${editing ? esc(editing.quantity) : 1}" />
     </label>
     <label class="field">Cost per skein (optional)
-      <input id="yf-cost" type="number" min="0" step="0.01" />
+      <input id="yf-cost" type="number" min="0" step="0.01" value="${v('cost')}" />
     </label>
+
+    <label class="field">Purchase date (optional estimate)
+      <input id="yf-purchasedate" type="date" value="${v('purchaseDate')}" />
+    </label>
+    <div></div>
 
     <div class="span2" style="display:flex; flex-wrap:wrap; align-items:center; gap:14px;">
       <label class="field">Color
@@ -650,7 +670,7 @@ function renderYarnForm(){
 
     <div class="span2" style="display:flex; gap:8px; justify-content:flex-end;">
       <button type="button" class="btn btn-ghost" onclick="hideYarnForm()">Cancel</button>
-      <button type="submit" class="btn btn-primary">Add to stash</button>
+      <button type="submit" class="btn btn-primary">${editing ? 'Save changes' : 'Add to stash'}</button>
     </div>
   </form>`;
 }
@@ -715,12 +735,11 @@ function pickSwatch(hex){
   renderSwatchRow();
 }
 
-function handleAddYarn(e){
+function handleSaveYarn(e){
   e.preventDefault();
   const name = document.getElementById('yf-name').value.trim();
   if(!name) return;
-  const yarn = {
-    id: uid(),
+  const fields = {
     name,
     colorway: document.getElementById('yf-colorway').value.trim(),
     fiber: document.getElementById('yf-fiber').value.trim(),
@@ -729,17 +748,25 @@ function handleAddYarn(e){
     skeinYardage: Number(document.getElementById('yf-skeinyardage').value) || 0,
     quantity: Number(document.getElementById('yf-quantity').value) || 1,
     cost: document.getElementById('yf-cost').value === '' ? null : Number(document.getElementById('yf-cost').value),
-    colorHex: pendingColorHex,
-    dateAdded: todayStr()
+    purchaseDate: document.getElementById('yf-purchasedate').value || null,
+    colorHex: pendingColorHex
   };
-  yarn.yardageRemaining = yarnTotalYardage(yarn);
-  STATE.yarns.push(yarn);
+
+  if(STATE.editingYarnId){
+    STATE.yarns = STATE.yarns.map(y => y.id===STATE.editingYarnId ? { ...y, ...fields } : y);
+  } else {
+    const yarn = { id: uid(), ...fields, status:'available', allocatedTo:null, dateAdded: todayStr() };
+    yarn.yardageRemaining = yarnTotalYardage(yarn);
+    STATE.yarns.push(yarn);
+  }
   persist();
   STATE.showYarnForm = false;
+  STATE.editingYarnId = null;
   renderTab();
 }
 
 function deleteYarn(id){
+  if(!confirm('Remove this yarn from your stash? This cannot be undone.')) return;
   STATE.yarns = STATE.yarns.filter(y=>y.id!==id);
   persist();
   renderTab();
@@ -749,10 +776,21 @@ function changeRemaining(id, val){
   STATE.yarns = STATE.yarns.map(y => y.id===id ? {...y, yardageRemaining:n} : y);
   persist();
 }
+function toggleYarnStatus(id, projectId){
+  STATE.yarns = STATE.yarns.map(y => {
+    if(y.id!==id) return y;
+    const next = yarnStatus(y)==='allocated' ? 'available' : 'allocated';
+    return { ...y, status: next, allocatedTo: next==='allocated' ? (projectId || y.allocatedTo || null) : null };
+  });
+  persist();
+  renderTab();
+}
 
 function renderYarnCard(y){
   const total = yarnTotalYardage(y);
   const subtitle = y.colorway ? esc(y.colorway) : '';
+  const allocated = yarnStatus(y)==='allocated';
+  const allocatedProject = allocated && y.allocatedTo ? STATE.projects.find(p=>p.id===y.allocatedTo) : null;
   return `<div class="card yarn-card">
     <div class="yarn-hole"></div>
     <div class="yarn-top">
@@ -763,7 +801,10 @@ function renderYarnCard(y){
           ${subtitle ? `<p class="yarn-sub">${subtitle}</p>` : ''}
         </div>
       </div>
-      <button class="del-btn" onclick="deleteYarn('${y.id}')" aria-label="Remove yarn">${ICONS.trash}</button>
+      <div style="display:flex; gap:4px; flex-shrink:0;">
+        <button class="del-btn" onclick="showYarnForm('${y.id}')" aria-label="Edit yarn">${ICONS.pencil}</button>
+        <button class="del-btn" onclick="deleteYarn('${y.id}')" aria-label="Remove yarn">${ICONS.trash}</button>
+      </div>
     </div>
     <div class="yarn-meta">
       <span>${esc(categorizeFiber(y.fiber))}</span>
@@ -775,6 +816,11 @@ function renderYarnCard(y){
         / ${total} yd <span class="note">(${y.quantity}× ${y.skeinYardage}yd)</span>
       </span>
       ${y.cost ? `<span class="note">$${(Number(y.cost)*y.quantity).toFixed(2)}</span>` : ''}
+    </div>
+    <div style="margin-top:8px; display:flex; align-items:center; justify-content:space-between;">
+      <button type="button" class="harmony-btn ${allocated?'active':''}" onclick="toggleYarnStatus('${y.id}')" style="font-size:0.68rem; padding:3px 9px;">
+        ${allocated ? 'Allocated' + (allocatedProject ? ' · '+esc(allocatedProject.name) : '') : 'Mark allocated'}
+      </button>
     </div>
   </div>`;
 }
@@ -797,45 +843,76 @@ function renderProjects(){
   return html;
 }
 
-function showProjectForm(){
+/* Shared cleanup for both yarn and project forms: if a brand-new project
+   draft is discarded, free any stash yarns that were allocated to it so
+   they don't end up permanently "allocated" to a project that was never saved. */
+function cleanupOpenForms(){
+  if(STATE.showProjectForm && STATE.editingProjectId && !STATE.projects.find(p=>p.id===STATE.editingProjectId)){
+    let changed = false;
+    STATE.yarns = STATE.yarns.map(y=>{
+      if(y.allocatedTo===STATE.editingProjectId){ changed = true; return {...y, status:'available', allocatedTo:null}; }
+      return y;
+    });
+    if(changed) persist();
+  }
+  STATE.showYarnForm = false;
+  STATE.showProjectForm = false;
+  STATE.editingYarnId = null;
+  STATE.editingProjectId = null;
+}
+
+function showProjectForm(id){
   STATE.showProjectForm = true;
-  pendingProjectYarnIds = [];
-  pendingProjectLinks = [];
+  STATE.editingProjectId = id || uid(); // real id when editing, draft id reserved up front when adding
+  const editing = id ? STATE.projects.find(p=>p.id===id) : null;
+  pendingProjectYarnIds = editing ? [...(editing.yarnIds||[])] : [];
+  pendingProjectLinks = editing ? (editing.links||[]).map(l=>({...l})) : [];
   renderTab();
 }
-function hideProjectForm(){ STATE.showProjectForm = false; renderTab(); }
+function hideProjectForm(){ cleanupOpenForms(); renderTab(); }
 
 function renderProjectForm(){
+  const editing = STATE.projects.find(p=>p.id===STATE.editingProjectId) || null;
+  const v = (field, fallback='') => editing ? esc(editing[field] ?? fallback) : fallback;
   const yarnPicker = STATE.yarns.length===0
     ? `<p class="note">Add yarn to your stash first to link it here.</p>`
-    : `<div class="yarn-picker">${STATE.yarns.map(y=>`
-        <button type="button" class="yarn-chip ${pendingProjectYarnIds.includes(y.id)?'checked':''}" onclick="toggleProjectYarn('${y.id}')">
-          <span class="dot" style="background:${y.colorHex}"></span>${esc(y.name)}
-        </button>`).join('')}</div>`;
+    : `<div class="yarn-picker">${STATE.yarns.map(y=>{
+        const checked = pendingProjectYarnIds.includes(y.id);
+        const allocated = yarnStatus(y)==='allocated';
+        return `<div style="display:flex; align-items:center; gap:5px;">
+          <button type="button" class="yarn-chip ${checked?'checked':''}" onclick="toggleProjectYarn('${y.id}')">
+            <span class="dot" style="background:${y.colorHex}"></span>${esc(y.name)}
+          </button>
+          ${checked ? `
+            <button type="button" class="btn btn-ghost btn-small" onclick="toggleYarnStatus('${y.id}','${STATE.editingProjectId}')" title="Not fully used? Mark it aside so it's excluded from your 'unused stash' count.">${allocated?'Un-allocate':'Mark allocated'}</button>
+            <button type="button" class="btn btn-ghost btn-small" onclick="removeYarnFromStashInline('${y.id}')" title="Fully used — remove it from the stash">${ICONS.trash}</button>
+          ` : ''}
+        </div>`;
+      }).join('')}</div>`;
 
   return `
-  <form class="card form-grid" onsubmit="handleAddProject(event)" style="margin-bottom:22px;">
+  <form class="card form-grid" onsubmit="handleSaveProject(event)" style="margin-bottom:22px;">
     <label class="field">Project name
-      <input id="pf-name" required placeholder="Gift cowl for Dana" />
+      <input id="pf-name" required placeholder="Gift cowl for Dana" value="${v('name')}" />
     </label>
     <label class="field">Pattern (optional)
-      <input id="pf-pattern" />
+      <input id="pf-pattern" value="${v('patternName')}" />
     </label>
     <label class="field">Status
-      <select id="pf-status">${STATUSES.map(s=>`<option>${s}</option>`).join('')}</select>
+      <select id="pf-status">${STATUSES.map(s=>`<option ${(editing ? editing.status===s : s==='Planned')?'selected':''}>${s}</option>`).join('')}</select>
     </label>
     <label class="field">Yardage used (optional)
-      <input id="pf-yardageused" type="number" min="0" />
+      <input id="pf-yardageused" type="number" min="0" value="${v('yardageUsed')}" />
     </label>
     <label class="field">Start date
-      <input id="pf-startdate" type="date" value="${todayStr()}" />
+      <input id="pf-startdate" type="date" value="${editing ? esc(editing.startDate) : todayStr()}" />
     </label>
     <label class="field">Finish date (optional)
-      <input id="pf-finishdate" type="date" />
+      <input id="pf-finishdate" type="date" value="${v('finishDate')}" />
     </label>
 
     <div class="span2">
-      <span class="note" style="display:block; margin-bottom:6px;">Yarns used</span>
+      <span class="note" style="display:block; margin-bottom:6px;">Yarns used — mark yarn allocated if you're only using part of it, or remove it from the stash if it's fully used up</span>
       ${yarnPicker}
     </div>
 
@@ -845,12 +922,17 @@ function renderProjectForm(){
         <input id="pf-link-url" placeholder="https://youtube.com/watch?v=..." style="flex:1;" />
         <button type="button" class="btn btn-ghost btn-small" onclick="addProjectLink()">${ICONS.link} Add link</button>
       </div>
-      <div id="pf-link-previews" class="link-preview-row"></div>
+      <div id="pf-link-previews" class="link-preview-row">${pendingProjectLinks.map(l => `
+        <span class="link-preview-chip">
+          ${l.thumbnail ? `<img src="${esc(l.thumbnail)}" alt="" />` : ''}
+          ${esc(l.title)}
+          <button type="button" onclick="removePendingLink('${l.id}')">✕</button>
+        </span>`).join('')}</div>
     </div>
 
     <div class="span2" style="display:flex; gap:8px; justify-content:flex-end;">
       <button type="button" class="btn btn-ghost" onclick="hideProjectForm()">Cancel</button>
-      <button type="submit" class="btn btn-primary">Add project</button>
+      <button type="submit" class="btn btn-primary">${editing ? 'Save changes' : 'Add project'}</button>
     </div>
   </form>`;
 }
@@ -859,6 +941,13 @@ function toggleProjectYarn(id){
   pendingProjectYarnIds = pendingProjectYarnIds.includes(id)
     ? pendingProjectYarnIds.filter(x=>x!==id)
     : [...pendingProjectYarnIds, id];
+  renderTab();
+}
+function removeYarnFromStashInline(yarnId){
+  if(!confirm('Remove this yarn from your stash entirely? This cannot be undone.')) return;
+  STATE.yarns = STATE.yarns.filter(y=>y.id!==yarnId);
+  pendingProjectYarnIds = pendingProjectYarnIds.filter(id=>id!==yarnId);
+  persist();
   renderTab();
 }
 
@@ -900,12 +989,12 @@ function renderLinkPreviews(){
     </span>`).join('');
 }
 
-function handleAddProject(e){
+function handleSaveProject(e){
   e.preventDefault();
   const name = document.getElementById('pf-name').value.trim();
   if(!name) return;
-  const proj = {
-    id: uid(),
+  const existing = STATE.projects.find(p=>p.id===STATE.editingProjectId);
+  const fields = {
     name,
     patternName: document.getElementById('pf-pattern').value.trim(),
     status: document.getElementById('pf-status').value,
@@ -913,16 +1002,22 @@ function handleAddProject(e){
     finishDate: document.getElementById('pf-finishdate').value || null,
     yardageUsed: document.getElementById('pf-yardageused').value === '' ? null : Number(document.getElementById('pf-yardageused').value),
     yarnIds: [...pendingProjectYarnIds],
-    links: pendingProjectLinks.map(l=>({ id:l.id, url:l.url, type:l.type, title:l.title, thumbnail:l.thumbnail })),
-    createdAt: todayStr()
+    links: pendingProjectLinks.map(l=>({ id:l.id, url:l.url, type:l.type, title:l.title, thumbnail:l.thumbnail }))
   };
-  STATE.projects.push(proj);
+  if(existing){
+    STATE.projects = STATE.projects.map(p => p.id===STATE.editingProjectId ? { ...p, ...fields } : p);
+  } else {
+    STATE.projects.push({ id: STATE.editingProjectId, ...fields, createdAt: todayStr() });
+  }
   persist();
   STATE.showProjectForm = false;
+  STATE.editingProjectId = null;
   renderTab();
 }
 
 function deleteProject(id){
+  if(!confirm("Delete this project? This cannot be undone.")) return;
+  STATE.yarns = STATE.yarns.map(y => y.allocatedTo===id ? { ...y, status:'available', allocatedTo:null } : y);
   STATE.projects = STATE.projects.filter(p=>p.id!==id);
   persist();
   renderTab();
@@ -953,6 +1048,7 @@ function renderProjectRow(p){
     <select class="status-select" onchange="updateProjectStatus('${p.id}', this.value)">
       ${STATUSES.map(s=>`<option ${s===p.status?'selected':''}>${s}</option>`).join('')}
     </select>
+    <button class="del-btn" onclick="showProjectForm('${p.id}')" aria-label="Edit project">${ICONS.pencil}</button>
     <button class="del-btn" onclick="deleteProject('${p.id}')" aria-label="Delete project">${ICONS.trash}</button>
   </div>`;
 }
