@@ -183,6 +183,7 @@
   .swatch-btn.selected{ border:2px solid var(--ink); }
 
   .photo-dropzone{ border:1px dashed var(--border); border-radius:10px; padding:14px 16px; width:100%; max-width:200px; margin:0 auto; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; text-align:center; transition:background 0.15s, border-color 0.15s; }
+  .photo-dropzone-lg{ max-width:400px; padding:28px 32px; gap:10px; }
   .photo-dropzone.dragover{ background:rgba(92,58,114,0.08); border-color:var(--plum); }
 
   .photo-thumb-row{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
@@ -923,7 +924,7 @@ function buildColorSectionHTML(){
       <label class="field">Color
         <input id="yf-colorhex" type="color" value="${pendingColorHex}" onchange="pendingColorHex=this.value" />
       </label>
-      <div style="flex:1; min-width:220px;">
+      <div>
         <div class="photo-dropzone" ondragover="onPhotoDropzoneDragOver(event)" ondragleave="onPhotoDropzoneDragLeave(event)" ondrop="onPhotoDropzoneDrop(event)">
           <span class="note">Drag a photo here, or</span>
           <button type="button" class="btn btn-ghost btn-small" onclick="document.getElementById('yf-photo').click()">${ICONS.upload} Upload photo</button>
@@ -956,13 +957,13 @@ function buildColorSectionHTML(){
 
   return `
     <div class="conic-swatch" style="background:${buildConicGradient(pendingYarnColors)};" title="Preview"></div>
-    <div style="flex:1; min-width:240px;">
+    <div>
       <div class="color-chip-row">${chips}</div>
       <div style="display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap;">
         <input id="yf-new-color" type="color" value="#5C3A72" />
         <button type="button" class="btn btn-ghost btn-small" onclick="addManualColor()">${ICONS.plus} Add color</button>
       </div>
-      <div class="photo-dropzone" style="margin-top:8px;" ondragover="onPhotoDropzoneDragOver(event)" ondragleave="onPhotoDropzoneDragLeave(event)" ondrop="onPhotoDropzoneDrop(event)">
+      <div class="photo-dropzone" style="margin:8px 0 0;" ondragover="onPhotoDropzoneDragOver(event)" ondragleave="onPhotoDropzoneDragLeave(event)" ondrop="onPhotoDropzoneDrop(event)">
         <span class="note">Drag a photo here, or</span>
         <button type="button" class="btn btn-ghost btn-small" onclick="document.getElementById('yf-photo-multi').click()">${ICONS.upload} Upload photo</button>
         <input id="yf-photo-multi" type="file" accept="image/*,.heic,.heif" style="display:none" onchange="handleMulticolorPhotoUpload(event)" />
@@ -1237,7 +1238,7 @@ function buildProjectPhotosHTML(){
   return `
     <div class="photo-thumb-row">${thumbs}</div>
     ${canAddMore
-      ? `<div class="photo-dropzone" ondragover="onPhotoDropzoneDragOver(event)" ondragleave="onPhotoDropzoneDragLeave(event)" ondrop="onProjectPhotoDrop(event)">
+      ? `<div class="photo-dropzone photo-dropzone-lg" ondragover="onPhotoDropzoneDragOver(event)" ondragleave="onPhotoDropzoneDragLeave(event)" ondrop="onProjectPhotoDrop(event)">
            <span class="note">Drag a photo here, or</span>
            <button type="button" class="btn btn-ghost btn-small" onclick="document.getElementById('pf-photo-input').click()">${ICONS.upload} Add photo (${pendingProjectPhotos.length}/3)</button>
            <input id="pf-photo-input" type="file" accept="image/*,.heic,.heif" style="display:none" onchange="handleProjectPhotoUpload(event)" />
