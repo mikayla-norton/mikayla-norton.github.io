@@ -14,7 +14,7 @@
     getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
   import {
-    getFirestore, doc, getDoc, setDoc
+    getFirestore, doc, getDoc, setDoc, updateDoc, arrayUnion
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
   const firebaseConfig = {
@@ -60,6 +60,11 @@
       }catch(e){
         // Expected once the doc already exists — client writes are denied by design.
       }
+    },
+    // Appends one preset to the existing array. Firestore rules restrict this
+    // update to the admin account, so this will reject for anyone else.
+    async addPreset(lineObj){
+      await updateDoc(doc(db, 'presets', 'brands'), { lines: arrayUnion(lineObj) });
     }
   };
 
@@ -209,6 +214,13 @@ const CHART_COLORS = ['#3E6B49','#5C3A72','#9B7EC0','#8FAF7C','#6E6178'];
 const WEIGHTS = ["Lace","Fingering","Sport","DK","Worsted","Aran","Bulky","Super Bulky"];
 const STATUSES = ["Planned","WIP","Finished","Frogged"];
 const HARMONIES = ["Complementary","Analogous","Triadic","Split-Complementary"];
+
+/* Only this account sees and can use the "Add preset" admin panel.
+   Enforced here for the UI, and separately in Firestore security rules
+   for the actual write — the UI check alone would not stop someone
+   from calling the write directly, so both layers matter. */
+const ADMIN_EMAIL = "miknorton19@gmail.com";
+function isAdmin(){ return !!(STATE.user && STATE.user.email === ADMIN_EMAIL); }
 
 /* Curated brand/line presets — approximate specs, always double-check the ball band.
    Stored as a flat array (not nested) so it maps cleanly onto a Firestore array-of-maps
@@ -438,6 +450,7 @@ function render(){
       <button class="${STATE.tab==='stash'?'active':''}" onclick="switchTab('stash')">${ICONS.package} Stash</button>
       <button class="${STATE.tab==='projects'?'active':''}" onclick="switchTab('projects')">${ICONS.sparkles} Projects</button>
       <button class="${STATE.tab==='palette'?'active':''}" onclick="switchTab('palette')">${ICONS.palette} Palette lab</button>
+      ${isAdmin() ? `<button class="${STATE.tab==='presets'?'active':''}" onclick="switchTab('presets')">${ICONS.bookmark} Presets</button>` : ''}
     </nav>
     <div id="inner-tab-content"></div>
   `;
@@ -459,6 +472,7 @@ function renderTab(){
   else if(STATE.tab==='stash') el.innerHTML = renderStash();
   else if(STATE.tab==='projects') el.innerHTML = renderProjects();
   else if(STATE.tab==='palette') el.innerHTML = renderPalette();
+  else if(STATE.tab==='presets') el.innerHTML = renderPresetsAdmin();
 
   if(STATE.tab==='overview') renderCharts();
   if(STATE.tab==='stash' && STATE.showYarnForm) wireBrandSelectors();
@@ -1117,6 +1131,74 @@ function renderPalette(){
   <div class="card palette-picks">${picks}</div>
   ${stretched ? `<p class="note" style="margin-top:14px;">Your stash doesn't have a close match for every slot in this harmony — the closest options above are a bit of a stretch. Might be a sign it's time to add to the stash, or try a different harmony.</p>` : ''}
   `;
+}
+
+/* =================================================================
+   Presets admin — visible and usable only by ADMIN_EMAIL. Appends
+   directly to the Firestore "lines" array; everyone else still only
+   gets read access (enforced by security rules, not just this check).
+================================================================= */
+function renderPresetsAdmin(){
+  if(!isAdmin()){
+    return `<p class="note">Not available.</p>`;
+  }
+  const rows = [...YARN_PRESETS]
+    .sort((a,b)=> a.brand.localeCompare(b.brand) || a.line.localeCompare(b.line))
+    .map(p => `<div style="display:flex; justify-content:space-between; gap:12px; padding:7px 0; border-bottom:1px dashed var(--border); font-size:0.82rem;">
+        <span>${esc(p.brand)} — ${esc(p.line)}</span>
+        <span class="note">${esc(p.fiber)} · ${esc(p.weightCategory)} · ${p.skeinWeightGrams}g / ${p.skeinYardage}yd</span>
+      </div>`).join('');
+
+  return `
+  <form class="card form-grid" onsubmit="event.preventDefault(); handleAddPreset();" style="margin-bottom:20px;">
+    <label class="field">Brand
+      <input id="pa-brand" required placeholder="Bernat" />
+    </label>
+    <label class="field">Line
+      <input id="pa-line" required placeholder="Baby Blanket" />
+    </label>
+    <label class="field">Fiber content
+      <input id="pa-fiber" placeholder="100% Acrylic" />
+    </label>
+    <label class="field">Weight category
+      <select id="pa-weightcat">${WEIGHTS.map(w=>`<option ${w==='Worsted'?'selected':''}>${w}</option>`).join('')}</select>
+    </label>
+    <label class="field">Skein weight (g)
+      <input id="pa-skeinweight" type="number" min="0" placeholder="100" />
+    </label>
+    <label class="field">Yardage per skein
+      <input id="pa-skeinyardage" type="number" min="0" placeholder="220" />
+    </label>
+    <div class="span2" style="display:flex; justify-content:flex-end;">
+      <button type="submit" class="btn btn-primary">${ICONS.plus} Add preset</button>
+    </div>
+  </form>
+  <div class="card">
+    <p class="note" style="margin-bottom:6px;">${YARN_PRESETS.length} preset${YARN_PRESETS.length===1?'':'s'} currently available in the stash form</p>
+    ${rows}
+  </div>`;
+}
+
+async function handleAddPreset(){
+  const brand = document.getElementById('pa-brand').value.trim();
+  const line = document.getElementById('pa-line').value.trim();
+  if(!brand || !line) return;
+  const newLine = {
+    brand,
+    line,
+    fiber: document.getElementById('pa-fiber').value.trim(),
+    weightCategory: document.getElementById('pa-weightcat').value,
+    skeinWeightGrams: Number(document.getElementById('pa-skeinweight').value) || 0,
+    skeinYardage: Number(document.getElementById('pa-skeinyardage').value) || 0
+  };
+  try{
+    await window.FB.addPreset(newLine);
+    YARN_PRESETS = [...YARN_PRESETS, newLine];
+    renderTab();
+  }catch(e){
+    console.error('Could not add preset', e);
+    alert("Couldn't save that preset — check the console for details.");
+  }
 }
 
 /* =================================================================
