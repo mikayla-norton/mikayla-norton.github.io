@@ -165,6 +165,15 @@
   .swatch-btn{ width:26px; height:26px; border-radius:50%; cursor:pointer; border:1px solid var(--border); }
   .swatch-btn.selected{ border:2px solid var(--ink); }
 
+  .conic-swatch{ width:56px; height:56px; border-radius:50%; border:1px solid var(--border); flex-shrink:0; }
+  .color-chip-row{ display:flex; flex-wrap:wrap; gap:8px; }
+  .color-chip{ display:flex; align-items:center; gap:2px; padding:3px; border-radius:8px; border:1px solid var(--border); background:rgba(255,255,255,0.5); cursor:grab; }
+  .color-chip.dragging{ opacity:0.4; }
+  .color-chip-swatch{ width:22px; height:22px; border-radius:50%; display:inline-block; }
+  .chip-star{ background:none; border:none; cursor:pointer; font-size:0.8rem; color:var(--border); padding:0 2px; }
+  .chip-star.active{ color:var(--plum); }
+  .chip-remove{ background:none; border:none; cursor:pointer; font-size:0.7rem; color:var(--ink-soft); padding:0 2px; }
+
   .yarn-picker{ display:flex; flex-wrap:wrap; gap:8px; max-height:130px; overflow-y:auto; padding:8px; border:1px solid var(--border); border-radius:6px; }
   .yarn-chip{ display:inline-flex; align-items:center; gap:6px; font-size:0.75rem; padding:4px 9px; border-radius:999px; border:1px solid var(--border); background:transparent; cursor:pointer; color:var(--ink); }
   .yarn-chip.checked{ background:var(--bg); }
@@ -213,6 +222,7 @@ const STATUS_COLORS = { Planned:'#6E6178', WIP:'#8B5FA3', Finished:'#3E6B49', Fr
 const CHART_COLORS = ['#3E6B49','#5C3A72','#9B7EC0','#8FAF7C','#6E6178'];
 const WEIGHTS = ["Lace","Fingering","Sport","DK","Worsted","Aran","Bulky","Super Bulky"];
 const STATUSES = ["Planned","WIP","Finished","Frogged"];
+const GARMENT_SIZES = ["XS","S","M","L","XL","2X","3X","One size"];
 const HARMONIES = ["Complementary","Analogous","Triadic","Split-Complementary"];
 
 /* Only this account sees and can use the "Add preset" admin panel.
@@ -263,7 +273,14 @@ let STATE = {
 };
 let pendingColorHex = '#5C3A72';
 let extractedSwatches = [];
+let pendingYarnIsMulticolor = false;
+let pendingYarnColors = [];
+let pendingYarnPrimaryIndex = 0;
+let pendingYarnMatchMode = 'simple'; // 'simple' | 'full' — only meaningful for 2-3 color yarns
+let multicolorExtractedSwatches = [];
+let colorDragSrcIndex = null;
 let pendingProjectYarnIds = [];
+let pendingProjectYarnUsage = [];
 let pendingProjectLinks = [];
 let fiberChartInstance = null;
 let statusChartInstance = null;
@@ -307,6 +324,25 @@ function daysBetween(a,b){ const d = Math.round((new Date(b) - new Date(a)) / 86
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function yarnTotalYardage(y){ return (Number(y.skeinYardage)||0) * (Number(y.quantity)||1); }
 function yarnStatus(y){ return y.status || 'available'; }
+/* "Brand - Line - Colorway" for Palette Lab, since that's where knowing
+   exactly which skein you're looking at matters most. Falls back
+   gracefully for yarn saved before brand/line were split out. */
+function yarnDisplayName(y){
+  const parts = [];
+  if(y.brand) parts.push(y.brand);
+  if(y.line) parts.push(y.line);
+  if(parts.length===0 && y.name) parts.push(y.name);
+  if(y.colorway) parts.push(y.colorway);
+  return parts.join(' - ') || y.name || 'Unnamed yarn';
+}
+/* Prefer summing real per-yarn tracked usage; fall back to the simple
+   lump total for projects that never used the per-yarn picker. */
+function projectYardageUsed(p){
+  if(p.yarnUsage && p.yarnUsage.length){
+    return p.yarnUsage.reduce((s,u)=>s+(Number(u.yardageUsed)||0),0);
+  }
+  return Number(p.yardageUsed)||0;
+}
 
 /* Color math */
 function hexToRgb(hex){
@@ -336,6 +372,16 @@ function rgbToHsl([r,g,b]){
 }
 function hexToHsl(hex){ return rgbToHsl(hexToRgb(hex)); }
 function hueDistance(a,b){ const d=Math.abs(a-b)%360; return d>180 ? 360-d : d; }
+/* Hard-stop conic gradient — reads as distinct wedges of color in order,
+   not a blurred blend, which is what you want when the point is to see
+   each color and its position rather than an averaged look. */
+function buildConicGradient(colors){
+  if(!colors || colors.length===0) return '#ccc';
+  if(colors.length===1) return colors[0];
+  const step = 100/colors.length;
+  const stops = colors.map((c,i)=>`${c} ${(i*step).toFixed(2)}% ${((i+1)*step).toFixed(2)}%`).join(', ');
+  return `conic-gradient(${stops})`;
+}
 
 function kMeansColors(pixels, k=5, iterations=6){
   if(pixels.length===0) return [];
@@ -500,7 +546,7 @@ function computeStats(){
   const yarns = STATE.yarns, projects = STATE.projects;
   const totalYardage = yarns.reduce((s,y)=>s+yarnTotalYardage(y),0);
   const finished = projects.filter(p=>p.status==='Finished');
-  const usedYardage = finished.reduce((s,p)=>s+(Number(p.yardageUsed)||0),0);
+  const usedYardage = finished.reduce((s,p)=>s+projectYardageUsed(p),0);
   const utilization = totalYardage>0 ? Math.min(100,(usedYardage/totalYardage)*100) : 0;
   const wip = projects.filter(p=>p.status==='WIP');
   const oldestWip = wip.reduce((old,p)=> (!old || new Date(p.startDate) < new Date(old.startDate)) ? p : old, null);
@@ -615,6 +661,11 @@ function showYarnForm(id){
   const editing = id ? STATE.yarns.find(y=>y.id===id) : null;
   pendingColorHex = editing ? editing.colorHex : '#5C3A72';
   extractedSwatches = [];
+  pendingYarnIsMulticolor = !!(editing && editing.isMulticolor);
+  pendingYarnColors = editing && editing.colors ? [...editing.colors] : [];
+  pendingYarnPrimaryIndex = editing && typeof editing.primaryIndex === 'number' ? editing.primaryIndex : 0;
+  pendingYarnMatchMode = editing && editing.matchMode ? editing.matchMode : 'simple';
+  multicolorExtractedSwatches = [];
   renderTab();
 }
 function hideYarnForm(){ cleanupOpenForms(); renderTab(); }
@@ -636,8 +687,11 @@ function renderYarnForm(){
       <select id="yf-line-select" onchange="onLineChange()" disabled><option value="">— pick a brand first —</option></select>
     </label>`}
 
-    <label class="field">Name
-      <input id="yf-name" required placeholder="Malabrigo Rios" value="${v('name')}" />
+    <label class="field">Brand
+      <input id="yf-brand" placeholder="Malabrigo" value="${v('brand')}" />
+    </label>
+    <label class="field">Line
+      <input id="yf-line" required placeholder="Rios" value="${editing ? esc(editing.line ?? editing.name ?? '') : ''}" />
     </label>
     <label class="field">Colorway
       <input id="yf-colorway" placeholder="Ravelry Red" value="${v('colorway')}" />
@@ -669,17 +723,14 @@ function renderYarnForm(){
     </label>
     <div></div>
 
-    <div class="span2" style="display:flex; flex-wrap:wrap; align-items:center; gap:14px;">
-      <label class="field">Color
-        <input id="yf-colorhex" type="color" value="${pendingColorHex}" onchange="pendingColorHex=this.value" />
-      </label>
-      <div style="flex:1; min-width:220px;">
-        <span class="note" style="display:block; margin-bottom:4px;">Or extract from a photo</span>
-        <button type="button" class="btn btn-ghost btn-small" onclick="document.getElementById('yf-photo').click()">${ICONS.upload} Upload photo</button>
-        <input id="yf-photo" type="file" accept="image/*" style="display:none" onchange="handlePhotoUpload(event)" />
-        <span id="yf-extracting" class="note" style="display:none; margin-left:8px;">Clustering colors…</span>
-        <div id="yf-swatches" class="swatch-row"></div>
-      </div>
+    <label class="field" style="flex-direction:row; align-items:center; gap:8px;">
+      <input type="checkbox" id="yf-multicolor" ${pendingYarnIsMulticolor?'checked':''} onchange="toggleMulticolor(this.checked)" style="width:auto;" />
+      <span style="color:var(--ink);">This yarn is multicolor (variegated / self-striping / speckled)</span>
+    </label>
+    <div></div>
+
+    <div class="span2" id="yf-color-section" style="display:flex; flex-wrap:wrap; align-items:center; gap:14px;">
+      ${buildColorSectionHTML()}
     </div>
 
     <div class="span2" style="display:flex; gap:8px; justify-content:flex-end;">
@@ -709,7 +760,8 @@ function onLineChange(){
   if(!brand || !line) return;
   const preset = findPreset(brand, line);
   if(!preset) return;
-  document.getElementById('yf-name').value = `${brand} ${line}`;
+  document.getElementById('yf-brand').value = brand;
+  document.getElementById('yf-line').value = line;
   document.getElementById('yf-fiber').value = preset.fiber;
   document.getElementById('yf-weightcat').value = preset.weightCategory;
   document.getElementById('yf-skeinweight').value = preset.skeinWeightGrams;
@@ -749,12 +801,147 @@ function pickSwatch(hex){
   renderSwatchRow();
 }
 
+/* =================================================================
+   Multicolor yarn color-builder — its own self-contained section so
+   toggling/adding/reordering colors never touches the rest of the form.
+================================================================= */
+function refreshColorSection(){
+  const el = document.getElementById('yf-color-section');
+  if(el) el.innerHTML = buildColorSectionHTML();
+}
+
+function toggleMulticolor(checked){
+  pendingYarnIsMulticolor = checked;
+  if(checked && pendingYarnColors.length===0){
+    pendingYarnColors = [pendingColorHex];
+    pendingYarnPrimaryIndex = 0;
+  }
+  refreshColorSection();
+}
+
+function buildColorSectionHTML(){
+  if(!pendingYarnIsMulticolor){
+    return `
+      <label class="field">Color
+        <input id="yf-colorhex" type="color" value="${pendingColorHex}" onchange="pendingColorHex=this.value" />
+      </label>
+      <div style="flex:1; min-width:220px;">
+        <span class="note" style="display:block; margin-bottom:4px;">Or extract from a photo</span>
+        <button type="button" class="btn btn-ghost btn-small" onclick="document.getElementById('yf-photo').click()">${ICONS.upload} Upload photo</button>
+        <input id="yf-photo" type="file" accept="image/*" style="display:none" onchange="handlePhotoUpload(event)" />
+        <span id="yf-extracting" class="note" style="display:none; margin-left:8px;">Clustering colors…</span>
+        <div id="yf-swatches" class="swatch-row"></div>
+      </div>`;
+  }
+
+  const chips = pendingYarnColors.map((hex,i)=>`
+    <div class="color-chip" draggable="true" data-index="${i}"
+         ondragstart="onColorDragStart(event)" ondragover="onColorDragOver(event)"
+         ondrop="onColorDrop(event)" ondragend="onColorDragEnd(event)">
+      <span class="color-chip-swatch" style="background:${hex}; ${i===pendingYarnPrimaryIndex ? 'outline:2px solid var(--plum); outline-offset:2px;' : ''}"></span>
+      <button type="button" class="chip-star ${i===pendingYarnPrimaryIndex?'active':''}" title="Set as primary color (used for Palette Lab matching)" onclick="setPrimaryColor(${i})">★</button>
+      <button type="button" class="chip-remove" title="Remove this color" onclick="removeMulticolorColor(${i})">✕</button>
+    </div>`).join('');
+
+  const count = pendingYarnColors.length;
+  const modeControl = count>=2 && count<=3
+    ? `<div class="note" style="margin-top:8px;">
+        Palette Lab matching:
+        <label style="margin-left:6px;"><input type="radio" name="yf-matchmode" ${pendingYarnMatchMode==='simple'?'checked':''} onchange="pendingYarnMatchMode='simple'" /> Simple (primary color only)</label>
+        <label style="margin-left:12px;"><input type="radio" name="yf-matchmode" ${pendingYarnMatchMode==='full'?'checked':''} onchange="pendingYarnMatchMode='full'" /> Full (match on any of its colors)</label>
+      </div>`
+    : count>=4
+      ? `<p class="note" style="margin-top:8px;">4+ colors — shown here for reference and visualizing the mix, but not used in Palette Lab matching.</p>`
+      : `<p class="note" style="margin-top:8px;">Add at least one more color.</p>`;
+
+  return `
+    <div class="conic-swatch" style="background:${buildConicGradient(pendingYarnColors)};" title="Preview"></div>
+    <div style="flex:1; min-width:240px;">
+      <div class="color-chip-row">${chips}</div>
+      <div style="display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap;">
+        <input id="yf-new-color" type="color" value="#5C3A72" />
+        <button type="button" class="btn btn-ghost btn-small" onclick="addManualColor()">${ICONS.plus} Add color</button>
+        <button type="button" class="btn btn-ghost btn-small" onclick="document.getElementById('yf-photo-multi').click()">${ICONS.upload} Upload photo</button>
+        <input id="yf-photo-multi" type="file" accept="image/*" style="display:none" onchange="handleMulticolorPhotoUpload(event)" />
+      </div>
+      <span id="yf-multi-extracting" class="note" style="display:none;">Clustering colors…</span>
+      <div id="yf-multi-swatches" class="swatch-row">${multicolorExtractedSwatches.map(s=>`<button type="button" class="swatch-btn" style="background:${s.hex}" title="Tap to add ${s.hex}" onclick="addExtractedMulticolor('${s.hex}')"></button>`).join('')}</div>
+      ${modeControl}
+    </div>`;
+}
+
+function addManualColor(){
+  const val = document.getElementById('yf-new-color').value;
+  pendingYarnColors.push(val);
+  refreshColorSection();
+}
+function addExtractedMulticolor(hex){
+  pendingYarnColors.push(hex);
+  refreshColorSection();
+}
+function removeMulticolorColor(i){
+  pendingYarnColors.splice(i,1);
+  if(pendingYarnPrimaryIndex>=pendingYarnColors.length) pendingYarnPrimaryIndex = Math.max(0, pendingYarnColors.length-1);
+  else if(i<pendingYarnPrimaryIndex) pendingYarnPrimaryIndex--;
+  refreshColorSection();
+}
+function setPrimaryColor(i){ pendingYarnPrimaryIndex = i; refreshColorSection(); }
+
+function onColorDragStart(e){
+  colorDragSrcIndex = Number(e.currentTarget.dataset.index);
+  e.currentTarget.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+}
+function onColorDragOver(e){ e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }
+function onColorDragEnd(e){ e.currentTarget.classList.remove('dragging'); colorDragSrcIndex = null; }
+function onColorDrop(e){
+  e.preventDefault();
+  const targetIndex = Number(e.currentTarget.dataset.index);
+  if(colorDragSrcIndex===null || colorDragSrcIndex===targetIndex) return;
+  const moved = pendingYarnColors.splice(colorDragSrcIndex,1)[0];
+  pendingYarnColors.splice(targetIndex,0,moved);
+  if(pendingYarnPrimaryIndex===colorDragSrcIndex) pendingYarnPrimaryIndex = targetIndex;
+  else if(colorDragSrcIndex<pendingYarnPrimaryIndex && targetIndex>=pendingYarnPrimaryIndex) pendingYarnPrimaryIndex--;
+  else if(colorDragSrcIndex>pendingYarnPrimaryIndex && targetIndex<=pendingYarnPrimaryIndex) pendingYarnPrimaryIndex++;
+  colorDragSrcIndex = null;
+  refreshColorSection();
+}
+
+function handleMulticolorPhotoUpload(e){
+  const file = e.target.files[0];
+  if(!file) return;
+  document.getElementById('yf-multi-extracting').style.display = 'inline';
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  img.onload = () => {
+    const size = 50;
+    const canvas = document.createElement('canvas');
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, size, size);
+    const data = ctx.getImageData(0,0,size,size).data;
+    const pixels = [];
+    for(let i=0;i<data.length;i+=4){ if(data[i+3] < 100) continue; pixels.push([data[i],data[i+1],data[i+2]]); }
+    multicolorExtractedSwatches = kMeansColors(pixels, 6, 6).slice(0,6);
+    document.getElementById('yf-multi-extracting').style.display = 'none';
+    refreshColorSection();
+    URL.revokeObjectURL(url);
+  };
+  img.src = url;
+}
+
 function handleSaveYarn(e){
   e.preventDefault();
-  const name = document.getElementById('yf-name').value.trim();
-  if(!name) return;
+  const brand = document.getElementById('yf-brand').value.trim();
+  const line = document.getElementById('yf-line').value.trim();
+  if(!line) return;
+  const name = [brand, line].filter(Boolean).join(' ');
+  const multicolor = pendingYarnIsMulticolor && pendingYarnColors.length>=2;
+  const primaryIndex = multicolor ? Math.min(pendingYarnPrimaryIndex, pendingYarnColors.length-1) : 0;
   const fields = {
     name,
+    brand,
+    line,
     colorway: document.getElementById('yf-colorway').value.trim(),
     fiber: document.getElementById('yf-fiber').value.trim(),
     weightCategory: document.getElementById('yf-weightcat').value,
@@ -763,7 +950,11 @@ function handleSaveYarn(e){
     quantity: Number(document.getElementById('yf-quantity').value) || 1,
     cost: document.getElementById('yf-cost').value === '' ? null : Number(document.getElementById('yf-cost').value),
     purchaseDate: document.getElementById('yf-purchasedate').value || null,
-    colorHex: pendingColorHex
+    isMulticolor: multicolor,
+    colors: multicolor ? [...pendingYarnColors] : [],
+    primaryIndex: primaryIndex,
+    matchMode: multicolor && pendingYarnColors.length<=3 ? pendingYarnMatchMode : 'simple',
+    colorHex: multicolor ? pendingYarnColors[primaryIndex] : pendingColorHex
   };
 
   if(STATE.editingYarnId){
@@ -797,7 +988,17 @@ function toggleYarnStatus(id, projectId){
     return { ...y, status: next, allocatedTo: next==='allocated' ? (projectId || y.allocatedTo || null) : null };
   });
   persist();
-  renderTab();
+  refreshYarnPicker();
+}
+/* Updates just the yarn-picker portion of an open project form, instead of
+   re-rendering the whole form (which would wipe out anything typed into the
+   other fields of a not-yet-saved project). Falls back to a normal tab
+   re-render when called from outside the project form (e.g. the Stash tab's
+   "Mark allocated" button on a yarn card). */
+function refreshYarnPicker(){
+  const el = document.getElementById('pf-yarn-picker');
+  if(el) el.innerHTML = buildYarnPickerHTML();
+  else renderTab();
 }
 
 function renderYarnCard(y){
@@ -805,11 +1006,14 @@ function renderYarnCard(y){
   const subtitle = y.colorway ? esc(y.colorway) : '';
   const allocated = yarnStatus(y)==='allocated';
   const allocatedProject = allocated && y.allocatedTo ? STATE.projects.find(p=>p.id===y.allocatedTo) : null;
+  const multi = y.isMulticolor && y.colors && y.colors.length>=2;
+  const swatchBg = multi ? buildConicGradient(y.colors) : y.colorHex;
+  const swatchTitle = multi && y.colors.length>=4 ? ' title="4+ colors — reference only, not used in Palette Lab matching"' : '';
   return `<div class="card yarn-card">
     <div class="yarn-hole"></div>
     <div class="yarn-top">
       <div class="yarn-swatch-name">
-        <span class="swatch" style="background:${y.colorHex}"></span>
+        <span class="swatch" style="background:${swatchBg}"${swatchTitle}></span>
         <div style="min-width:0;">
           <p class="yarn-name">${esc(y.name)}</p>
           ${subtitle ? `<p class="yarn-sub">${subtitle}</p>` : ''}
@@ -857,15 +1061,21 @@ function renderProjects(){
   return html;
 }
 
-/* Shared cleanup for both yarn and project forms: if a brand-new project
-   draft is discarded, free any stash yarns that were allocated to it so
-   they don't end up permanently "allocated" to a project that was never saved. */
+/* Shared cleanup for both yarn and project forms. If a brand-new project
+   draft is discarded: (1) free any stash yarns that were allocated to it,
+   and (2) give back any yardage that was deducted from stash during this
+   session, since none of that should stick to a project that was never
+   saved. Editing an *existing* project does not revert on cancel — yardage
+   already recorded as used represents real-world consumption, not a draft. */
 function cleanupOpenForms(){
   if(STATE.showProjectForm && STATE.editingProjectId && !STATE.projects.find(p=>p.id===STATE.editingProjectId)){
     let changed = false;
     STATE.yarns = STATE.yarns.map(y=>{
-      if(y.allocatedTo===STATE.editingProjectId){ changed = true; return {...y, status:'available', allocatedTo:null}; }
-      return y;
+      let updated = y;
+      if(y.allocatedTo===STATE.editingProjectId){ changed = true; updated = { ...updated, status:'available', allocatedTo:null }; }
+      const usage = pendingProjectYarnUsage.find(u=>u.yarnId===y.id);
+      if(usage && usage.yardageUsed){ changed = true; updated = { ...updated, yardageRemaining:(Number(updated.yardageRemaining)||0) + usage.yardageUsed }; }
+      return updated;
     });
     if(changed) persist();
   }
@@ -873,6 +1083,7 @@ function cleanupOpenForms(){
   STATE.showProjectForm = false;
   STATE.editingYarnId = null;
   STATE.editingProjectId = null;
+  pendingProjectYarnUsage = [];
 }
 
 function showProjectForm(id){
@@ -881,28 +1092,95 @@ function showProjectForm(id){
   const editing = id ? STATE.projects.find(p=>p.id===id) : null;
   pendingProjectYarnIds = editing ? [...(editing.yarnIds||[])] : [];
   pendingProjectLinks = editing ? (editing.links||[]).map(l=>({...l})) : [];
+  pendingProjectYarnUsage = editing ? (editing.yarnUsage||[]).map(u=>({...u})) : [];
   renderTab();
 }
 function hideProjectForm(){ cleanupOpenForms(); renderTab(); }
 
+/* Yarn picker: unlinked stash yarns show as tap-to-add chips; once linked,
+   a yarn drops into its own row with live controls — yards used so far
+   (which actually deducts from stash as you go), allocate, remove-from-
+   stash, and unlink. Rebuilt in isolation by refreshYarnPicker() so the
+   rest of the project form is never touched. */
+function buildYarnPickerHTML(){
+  if(STATE.yarns.length===0) return `<p class="note">Add yarn to your stash first to link it here.</p>`;
+  const linked = STATE.yarns.filter(y=>pendingProjectYarnIds.includes(y.id));
+  const unlinked = STATE.yarns.filter(y=>!pendingProjectYarnIds.includes(y.id));
+
+  const chips = unlinked.length
+    ? `<div class="yarn-picker">${unlinked.map(y=>`
+        <button type="button" class="yarn-chip" onclick="toggleProjectYarn('${y.id}')">
+          <span class="dot" style="background:${y.colorHex}"></span>${esc(y.name)}
+        </button>`).join('')}</div>`
+    : `<p class="note">Every stash yarn is already linked to this project.</p>`;
+
+  const rows = linked.map(y=>{
+    const allocated = yarnStatus(y)==='allocated';
+    const usage = pendingProjectYarnUsage.find(u=>u.yarnId===y.id);
+    const used = usage ? usage.yardageUsed : 0;
+    return `<div style="display:flex; align-items:center; gap:8px; padding:7px 2px; border-bottom:1px dashed var(--border); flex-wrap:wrap;">
+      <span class="dot" style="background:${y.colorHex}; flex-shrink:0;"></span>
+      <span style="font-size:0.82rem; flex:1; min-width:110px;">${esc(y.name)}</span>
+      <label style="display:flex; align-items:center; gap:4px; font-size:0.72rem; color:var(--ink-soft);">
+        Used
+        <input type="number" min="0" value="${used}" style="width:58px;" onchange="updateProjectYarnUsage('${y.id}', this.value)" />
+        yd
+      </label>
+      <span class="note" style="font-size:0.7rem; white-space:nowrap;">${y.yardageRemaining} yd left in stash</span>
+      <button type="button" class="btn btn-ghost btn-small" onclick="toggleYarnStatus('${y.id}','${STATE.editingProjectId}')" title="Not fully used? Set it aside so it's excluded from your 'unused stash' count.">${allocated?'Un-allocate':'Allocate'}</button>
+      <button type="button" class="btn btn-ghost btn-small" onclick="removeYarnFromStashInline('${y.id}')" title="Skein is gone — remove it from the stash entirely">${ICONS.trash}</button>
+      <button type="button" class="btn btn-ghost btn-small" onclick="toggleProjectYarn('${y.id}')" title="Unlink from this project (gives back any yardage recorded here)">✕</button>
+    </div>`;
+  }).join('');
+
+  return `${chips}${linked.length ? `<div style="margin-top:10px;">${rows}</div>` : ''}`;
+}
+
+function toggleProjectYarn(id){
+  const isLinked = pendingProjectYarnIds.includes(id);
+  if(isLinked){
+    const usage = pendingProjectYarnUsage.find(u=>u.yarnId===id);
+    if(usage && usage.yardageUsed){
+      STATE.yarns = STATE.yarns.map(y => y.id===id ? { ...y, yardageRemaining:(Number(y.yardageRemaining)||0) + usage.yardageUsed } : y);
+      persist();
+    }
+    pendingProjectYarnUsage = pendingProjectYarnUsage.filter(u=>u.yarnId!==id);
+    pendingProjectYarnIds = pendingProjectYarnIds.filter(x=>x!==id);
+  } else {
+    pendingProjectYarnIds = [...pendingProjectYarnIds, id];
+  }
+  refreshYarnPicker();
+}
+/* The actual stash-quantity-tracking feature: editing "yards used" for a
+   linked yarn deducts only the *change* from last time from that yarn's
+   yardageRemaining, so re-editing the number as a project progresses
+   (rather than only recording a final total) keeps the stash accurate. */
+function updateProjectYarnUsage(yarnId, val){
+  const newVal = Math.max(0, Number(val) || 0);
+  const entry = pendingProjectYarnUsage.find(u=>u.yarnId===yarnId);
+  const prevVal = entry ? entry.yardageUsed : 0;
+  const delta = newVal - prevVal;
+  STATE.yarns = STATE.yarns.map(y => y.id===yarnId ? { ...y, yardageRemaining:(Number(y.yardageRemaining)||0) - delta } : y);
+  if(entry) entry.yardageUsed = newVal;
+  else pendingProjectYarnUsage.push({ yarnId, yardageUsed: newVal });
+  persist();
+  refreshYarnPicker();
+}
+function removeYarnFromStashInline(yarnId){
+  if(!confirm('Remove this yarn from your stash entirely? This cannot be undone.')) return;
+  STATE.yarns = STATE.yarns.filter(y=>y.id!==yarnId);
+  pendingProjectYarnIds = pendingProjectYarnIds.filter(id=>id!==yarnId);
+  pendingProjectYarnUsage = pendingProjectYarnUsage.filter(u=>u.yarnId!==yarnId);
+  persist();
+  refreshYarnPicker();
+}
+
 function renderProjectForm(){
   const editing = STATE.projects.find(p=>p.id===STATE.editingProjectId) || null;
   const v = (field, fallback='') => editing ? esc(editing[field] ?? fallback) : fallback;
-  const yarnPicker = STATE.yarns.length===0
-    ? `<p class="note">Add yarn to your stash first to link it here.</p>`
-    : `<div class="yarn-picker">${STATE.yarns.map(y=>{
-        const checked = pendingProjectYarnIds.includes(y.id);
-        const allocated = yarnStatus(y)==='allocated';
-        return `<div style="display:flex; align-items:center; gap:5px;">
-          <button type="button" class="yarn-chip ${checked?'checked':''}" onclick="toggleProjectYarn('${y.id}')">
-            <span class="dot" style="background:${y.colorHex}"></span>${esc(y.name)}
-          </button>
-          ${checked ? `
-            <button type="button" class="btn btn-ghost btn-small" onclick="toggleYarnStatus('${y.id}','${STATE.editingProjectId}')" title="Not fully used? Mark it aside so it's excluded from your 'unused stash' count.">${allocated?'Un-allocate':'Mark allocated'}</button>
-            <button type="button" class="btn btn-ghost btn-small" onclick="removeYarnFromStashInline('${y.id}')" title="Fully used — remove it from the stash">${ICONS.trash}</button>
-          ` : ''}
-        </div>`;
-      }).join('')}</div>`;
+  const hasGarmentInfo = !!(editing && (editing.garmentSize || editing.garmentGender));
+  const isStandardSize = editing && editing.garmentSize && GARMENT_SIZES.includes(editing.garmentSize);
+  const isCustomSize = editing && editing.garmentSize && !isStandardSize;
 
   return `
   <form class="card form-grid" onsubmit="handleSaveProject(event)" style="margin-bottom:22px;">
@@ -915,7 +1193,7 @@ function renderProjectForm(){
     <label class="field">Status
       <select id="pf-status">${STATUSES.map(s=>`<option ${(editing ? editing.status===s : s==='Planned')?'selected':''}>${s}</option>`).join('')}</select>
     </label>
-    <label class="field">Yardage used (optional)
+    <label class="field">Yardage used — simple total (optional)
       <input id="pf-yardageused" type="number" min="0" value="${v('yardageUsed')}" />
     </label>
     <label class="field">Start date
@@ -925,9 +1203,33 @@ function renderProjectForm(){
       <input id="pf-finishdate" type="date" value="${v('finishDate')}" />
     </label>
 
+    <details class="span2" ${hasGarmentInfo?'open':''} style="border:1px solid var(--border); border-radius:8px; padding:10px 14px;">
+      <summary style="cursor:pointer; font-size:0.85rem; color:var(--ink-soft);">Garment details (optional)</summary>
+      <div class="form-grid" style="margin-top:12px; margin-bottom:0;">
+        <label class="field">Size
+          <select id="pf-garment-size" onchange="onGarmentSizeChange()">
+            <option value="">—</option>
+            ${GARMENT_SIZES.map(s=>`<option ${isStandardSize && editing.garmentSize===s?'selected':''}>${s}</option>`).join('')}
+            <option value="__custom__" ${isCustomSize?'selected':''}>Custom…</option>
+          </select>
+        </label>
+        <label class="field" id="pf-garment-size-custom-wrap" style="display:${isCustomSize?'flex':'none'};">Custom size
+          <input id="pf-garment-size-custom" placeholder="e.g. 6-12 months" value="${isCustomSize ? esc(editing.garmentSize) : ''}" />
+        </label>
+        <label class="field">Fit
+          <select id="pf-garment-gender">
+            <option value="">—</option>
+            <option ${editing && editing.garmentGender==="Unisex"?'selected':''}>Unisex</option>
+            <option ${editing && editing.garmentGender==="Women's"?'selected':''}>Women's</option>
+            <option ${editing && editing.garmentGender==="Men's"?'selected':''}>Men's</option>
+          </select>
+        </label>
+      </div>
+    </details>
+
     <div class="span2">
-      <span class="note" style="display:block; margin-bottom:6px;">Yarns used — mark yarn allocated if you're only using part of it, or remove it from the stash if it's fully used up</span>
-      ${yarnPicker}
+      <span class="note" style="display:block; margin-bottom:6px;">Yarns used — tap to link, then track yards used, allocate, or remove as the project goes. (The simple total above is only used if you don't track per-yarn usage here.)</span>
+      <div id="pf-yarn-picker">${buildYarnPickerHTML()}</div>
     </div>
 
     <div class="span2">
@@ -950,19 +1252,9 @@ function renderProjectForm(){
     </div>
   </form>`;
 }
-
-function toggleProjectYarn(id){
-  pendingProjectYarnIds = pendingProjectYarnIds.includes(id)
-    ? pendingProjectYarnIds.filter(x=>x!==id)
-    : [...pendingProjectYarnIds, id];
-  renderTab();
-}
-function removeYarnFromStashInline(yarnId){
-  if(!confirm('Remove this yarn from your stash entirely? This cannot be undone.')) return;
-  STATE.yarns = STATE.yarns.filter(y=>y.id!==yarnId);
-  pendingProjectYarnIds = pendingProjectYarnIds.filter(id=>id!==yarnId);
-  persist();
-  renderTab();
+function onGarmentSizeChange(){
+  const val = document.getElementById('pf-garment-size').value;
+  document.getElementById('pf-garment-size-custom-wrap').style.display = val==='__custom__' ? 'flex' : 'none';
 }
 
 async function addProjectLink(){
@@ -1008,6 +1300,8 @@ function handleSaveProject(e){
   const name = document.getElementById('pf-name').value.trim();
   if(!name) return;
   const existing = STATE.projects.find(p=>p.id===STATE.editingProjectId);
+  const sizeSelect = document.getElementById('pf-garment-size').value;
+  const garmentSize = sizeSelect === '__custom__' ? document.getElementById('pf-garment-size-custom').value.trim() : sizeSelect;
   const fields = {
     name,
     patternName: document.getElementById('pf-pattern').value.trim(),
@@ -1015,7 +1309,10 @@ function handleSaveProject(e){
     startDate: document.getElementById('pf-startdate').value || todayStr(),
     finishDate: document.getElementById('pf-finishdate').value || null,
     yardageUsed: document.getElementById('pf-yardageused').value === '' ? null : Number(document.getElementById('pf-yardageused').value),
+    garmentSize: garmentSize || null,
+    garmentGender: document.getElementById('pf-garment-gender').value || null,
     yarnIds: [...pendingProjectYarnIds],
+    yarnUsage: pendingProjectYarnUsage.map(u=>({...u})),
     links: pendingProjectLinks.map(l=>({ id:l.id, url:l.url, type:l.type, title:l.title, thumbnail:l.thumbnail }))
   };
   if(existing){
@@ -1026,6 +1323,7 @@ function handleSaveProject(e){
   persist();
   STATE.showProjectForm = false;
   STATE.editingProjectId = null;
+  pendingProjectYarnUsage = [];
   renderTab();
 }
 
@@ -1045,6 +1343,7 @@ function updateProjectStatus(id, status){
 function renderProjectRow(p){
   const usedYarns = STATE.yarns.filter(y => (p.yarnIds||[]).includes(y.id));
   const daysActive = p.status==='WIP' ? daysBetween(p.startDate, todayStr()) : null;
+  const garmentBadge = (p.garmentSize || p.garmentGender) ? [p.garmentGender, p.garmentSize].filter(Boolean).join(' · ') : null;
   const linkStrip = (p.links||[]).length ? `<div class="link-strip">${p.links.map(l => l.thumbnail
       ? `<a class="link-card" href="${esc(l.url)}" target="_blank" rel="noopener"><img src="${esc(l.thumbnail)}" alt=""/><span class="link-title">${esc(l.title)}</span></a>`
       : `<a class="link-card generic" href="${esc(l.url)}" target="_blank" rel="noopener">${ICONS.link}<span class="link-title">${esc(l.title)}</span></a>`
@@ -1055,6 +1354,7 @@ function renderProjectRow(p){
       <p class="project-name">${esc(p.name)}${p.patternName ? ` <span class="pattern">— ${esc(p.patternName)}</span>` : ''}</p>
       <div class="project-meta">
         ${usedYarns.map(y=>`<span class="dot" style="background:${y.colorHex}" title="${esc(y.name)}"></span>`).join('')}
+        ${garmentBadge ? `<span class="note">${esc(garmentBadge)}</span>` : ''}
         ${daysActive!=null ? `<span class="days">${daysActive}d in progress</span>` : ''}
       </div>
       ${linkStrip}
@@ -1079,57 +1379,105 @@ function getHarmonyRoles(baseHue, type){
     default: return [];
   }
 }
+/* A yarn qualifies for the Palette Lab at all only if it's solid, or
+   multicolor with 3 colors or fewer (see isMulticolor/colors on the yarn
+   schema). Even eligible multicolor yarns always use their primary color
+   when acting as the BASE — a harmony is rotated around one anchor hue,
+   which isn't a meaningful operation against "all of a yarn's colors" at
+   once. matchMode only changes behavior when the yarn is a *candidate*
+   being checked against someone else's harmony: 'full' checks all of its
+   colors and reports back whichever one actually won the match. */
+function eligibleForPalette(y){
+  if(!y.colorHex) return false;
+  if(!y.isMulticolor) return true;
+  return y.colors && y.colors.length>=1 && y.colors.length<=3;
+}
+/* Weight-compatible = within one step of the base yarn's weight category
+   on the WEIGHTS list (e.g. DK matches Sport and Worsted, not Aran).
+   Missing weight data on either side is treated as compatible rather
+   than silently excluded, since we shouldn't punish incomplete entries. */
+function weightIndex(weightCategory){
+  const idx = WEIGHTS.indexOf(weightCategory);
+  return idx===-1 ? null : idx;
+}
+function weightCompatible(baseWeight, candidateWeight){
+  const bi = weightIndex(baseWeight), ci = weightIndex(candidateWeight);
+  if(bi===null || ci===null) return true;
+  return Math.abs(bi-ci) <= 1;
+}
 function suggestPalette(yarns, baseYarn, type){
   const baseHue = hexToHsl(baseYarn.colorHex).h;
   const roles = getHarmonyRoles(baseHue, type);
   const chosen = new Set([baseYarn.id]);
   return roles.map(r=>{
-    let best=null, bestD=Infinity;
+    let best=null, bestD=Infinity, bestHex=null;
     yarns.forEach(y=>{
       if(chosen.has(y.id)) return;
-      const d = hueDistance(hexToHsl(y.colorHex).h, r.hue);
-      if(d<bestD){ bestD=d; best=y; }
+      if(!weightCompatible(baseYarn.weightCategory, y.weightCategory)) return;
+      const candidateHexes = (y.isMulticolor && y.matchMode==='full' && y.colors && y.colors.length<=3)
+        ? y.colors
+        : [y.colorHex];
+      candidateHexes.forEach(hex=>{
+        const d = hueDistance(hexToHsl(hex).h, r.hue);
+        if(d<bestD){ bestD=d; best=y; bestHex=hex; }
+      });
     });
     if(best) chosen.add(best.id);
-    return {...r, yarn:best, distance: best ? Math.round(bestD) : null};
+    return {...r, yarn:best, matchedHex:bestHex, distance: best ? Math.round(bestD) : null};
   });
 }
 
+const HARMONY_DESCRIPTIONS = {
+  'Complementary': 'One opposite hue — bold, high-contrast pairing.',
+  'Analogous': 'Neighboring hues — calm, cohesive, low-contrast.',
+  'Triadic': 'Three evenly-spaced hues — vibrant and balanced.',
+  'Split-Complementary': 'A near-opposite pair instead of one direct opposite — contrast with less tension.'
+};
+
 function renderPalette(){
-  const colored = STATE.yarns.filter(y=>y.colorHex);
+  const colored = STATE.yarns.filter(eligibleForPalette);
+  const excludedCount = STATE.yarns.filter(y=>y.colorHex && !eligibleForPalette(y)).length;
   if(colored.length < 2){
-    return `<div class="empty"><p class="title">Add a few more colors</p><p class="body">The palette lab matches color-theory harmonies against yarn you actually own. Log at least two colored skeins in your stash to try it.</p></div>`;
+    return `<div class="empty"><p class="title">Add a few more colors</p><p class="body">The palette lab matches color-theory harmonies against yarn you actually own. Log at least two colored skeins in your stash to try it. (4+ color multicolor yarns aren't eligible for matching.)</p></div>`;
   }
   if(!STATE.paletteBaseId || !colored.find(y=>y.id===STATE.paletteBaseId)) STATE.paletteBaseId = colored[0].id;
   const base = colored.find(y=>y.id===STATE.paletteBaseId);
   const results = suggestPalette(colored, base, STATE.paletteHarmony);
 
+  const baseSwatchBg = base.isMulticolor && base.colors && base.colors.length>=2 ? buildConicGradient(base.colors) : base.colorHex;
   const picks = `<div class="palette-pick">
-      <span class="palette-swatch" style="background:${base.colorHex}"></span>
-      <p style="margin:0; font-weight:500; font-size:0.85rem;">${esc(base.name)}</p>
+      <span class="palette-swatch" style="background:${baseSwatchBg}"></span>
+      <p style="margin:0; font-weight:500; font-size:0.85rem;">${esc(yarnDisplayName(base))}</p>
       <p class="note" style="margin:0;">Base</p>
-    </div>` + results.filter(r=>r.yarn).map(r=>`
+    </div>` + results.filter(r=>r.yarn).map(r=>{
+      const viaMulticolor = r.yarn.isMulticolor && r.matchedHex && r.matchedHex!==r.yarn.colorHex;
+      return `
     <div class="palette-pick">
-      <span class="palette-swatch" style="background:${r.yarn.colorHex}"></span>
-      <p style="margin:0; font-weight:500; font-size:0.85rem;">${esc(r.yarn.name)}</p>
-      <p class="note" style="margin:0;">${esc(r.role)}${r.distance!=null ? ' · '+r.distance+'° off' : ''}</p>
-    </div>`).join('');
+      <span class="palette-swatch" style="background:${r.matchedHex || r.yarn.colorHex}"></span>
+      <p style="margin:0; font-weight:500; font-size:0.85rem;">${esc(yarnDisplayName(r.yarn))}</p>
+      <p class="note" style="margin:0;">${esc(r.role)}${r.distance!=null ? ' · '+r.distance+'° off' : ''}${viaMulticolor ? ' · via one of its colors' : ''}</p>
+    </div>`;
+    }).join('');
 
   const stretched = results.some(r=>r.distance!=null && r.distance>35);
+  const unfilledByWeight = results.some(r=>!r.yarn);
 
   return `
   <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end; margin-bottom:18px;">
     <label class="field">Base yarn
       <select onchange="STATE.paletteBaseId=this.value; renderTab();">
-        ${colored.map(y=>`<option value="${y.id}" ${y.id===base.id?'selected':''}>${esc(y.name)}</option>`).join('')}
+        ${colored.map(y=>`<option value="${y.id}" ${y.id===base.id?'selected':''}>${esc(yarnDisplayName(y))}</option>`).join('')}
       </select>
     </label>
     <div style="display:flex; gap:6px; flex-wrap:wrap;">
-      ${HARMONIES.map(h=>`<button class="harmony-btn ${STATE.paletteHarmony===h?'active':''}" onclick="STATE.paletteHarmony='${h}'; renderTab();">${h}</button>`).join('')}
+      ${HARMONIES.map(h=>`<button class="harmony-btn ${STATE.paletteHarmony===h?'active':''}" title="${esc(HARMONY_DESCRIPTIONS[h])}" onclick="STATE.paletteHarmony='${h}'; renderTab();">${h}</button>`).join('')}
     </div>
   </div>
+  <p class="note" style="margin:-10px 0 14px;">${esc(HARMONY_DESCRIPTIONS[STATE.paletteHarmony])}</p>
   <div class="card palette-picks">${picks}</div>
   ${stretched ? `<p class="note" style="margin-top:14px;">Your stash doesn't have a close match for every slot in this harmony — the closest options above are a bit of a stretch. Might be a sign it's time to add to the stash, or try a different harmony.</p>` : ''}
+  ${unfilledByWeight ? `<p class="note" style="margin-top:6px;">Matches are limited to yarn within one weight category of ${esc(base.weightCategory||'the base')} — one or more roles didn't have a compatible-weight match in your stash.</p>` : ''}
+  ${excludedCount>0 ? `<p class="note" style="margin-top:6px;">${excludedCount} skein${excludedCount===1?'':'s'} with 4+ colors ${excludedCount===1?"isn't":"aren't"} eligible for matching and ${excludedCount===1?"is":"are"} left out of this list.</p>` : ''}
   `;
 }
 
