@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -181,7 +182,7 @@
   .swatch-btn{ width:26px; height:26px; border-radius:50%; cursor:pointer; border:1px solid var(--border); }
   .swatch-btn.selected{ border:2px solid var(--ink); }
 
-  .photo-dropzone{ border:1px dashed var(--border); border-radius:8px; padding:10px 12px; transition:background 0.15s, border-color 0.15s; }
+  .photo-dropzone{ border:1px dashed var(--border); border-radius:10px; padding:14px 16px; width:100%; max-width:200px; margin:0 auto; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; text-align:center; transition:background 0.15s, border-color 0.15s; }
   .photo-dropzone.dragover{ background:rgba(92,58,114,0.08); border-color:var(--plum); }
 
   .photo-thumb-row{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
@@ -265,7 +266,7 @@ const ADMIN_EMAIL = "miknorton19@gmail.com";
 /* URL of the deployed "linkPreview" Cloud Function — see setup notes.
    Fill this in after deploying; until then, pattern/blog links just fall
    back to a plain bookmark card with the domain name, same as before. */
-const LINK_PREVIEW_ENDPOINT = "https://linkpreview-deanu6jutq-uc.a.run.app";
+const LINK_PREVIEW_ENDPOINT = "REPLACE_ME_LINK_PREVIEW_URL";
 function isAdmin(){ return !!(STATE.user && STATE.user.email === ADMIN_EMAIL); }
 
 /* Curated brand/line presets — approximate specs, always double-check the ball band.
@@ -418,6 +419,32 @@ function buildConicGradient(colors){
   const step = 100/colors.length;
   const stops = colors.map((c,i)=>`${c} ${(i*step).toFixed(2)}% ${((i+1)*step).toFixed(2)}%`).join(', ');
   return `conic-gradient(${stops})`;
+}
+
+/* Browsers can't decode HEIC/HEIF into an <img>/<canvas> — Apple's default
+   photo format — so anything picked up as one gets converted to a normal
+   JPEG first, entirely client-side, before it ever reaches the resize step
+   below or gets uploaded anywhere. */
+function looksLikeHeic(file){
+  if(!file) return false;
+  if(/^image\/hei[cf]/i.test(file.type||'')) return true;
+  return /\.hei[cf]$/i.test(file.name||'');
+}
+async function toRenderableImageBlob(file){
+  if(!looksLikeHeic(file)) return file;
+  if(typeof heic2any === 'undefined'){
+    throw new Error("Couldn't load HEIC support — check your connection and try again, or convert the photo to JPEG first.");
+  }
+  const result = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.9 });
+  return Array.isArray(result) ? result[0] : result;
+}
+/* A looser check than relying on file.type alone, since some browsers/OSes
+   report an empty or generic MIME type for HEIC files picked via a file
+   input or drag-and-drop. */
+function isAcceptableImageFile(file){
+  if(!file) return false;
+  if(/^image\//i.test(file.type||'')) return true;
+  return /\.(heic|heif|jpe?g|png|gif|webp|bmp)$/i.test(file.name||'');
 }
 
 /* Resizes+recompresses an image client-side before it ever leaves the
@@ -837,10 +864,13 @@ function handlePhotoUpload(e){
   const file = e.target.files[0];
   if(file) processSinglePhotoFile(file);
 }
-function processSinglePhotoFile(file){
+async function processSinglePhotoFile(file){
   document.getElementById('yf-extracting').style.display = 'inline';
+  let usable;
+  try{ usable = await toRenderableImageBlob(file); }
+  catch(err){ document.getElementById('yf-extracting').style.display = 'none'; alert(err.message); return; }
   const img = new Image();
-  const url = URL.createObjectURL(file);
+  const url = URL.createObjectURL(usable);
   img.onload = () => {
     const size = 50;
     const canvas = document.createElement('canvas');
@@ -855,6 +885,7 @@ function processSinglePhotoFile(file){
     renderSwatchRow();
     URL.revokeObjectURL(url);
   };
+  img.onerror = () => { document.getElementById('yf-extracting').style.display = 'none'; URL.revokeObjectURL(url); alert('Could not read that photo.'); };
   img.src = url;
 }
 function renderSwatchRow(){
@@ -894,12 +925,12 @@ function buildColorSectionHTML(){
       </label>
       <div style="flex:1; min-width:220px;">
         <div class="photo-dropzone" ondragover="onPhotoDropzoneDragOver(event)" ondragleave="onPhotoDropzoneDragLeave(event)" ondrop="onPhotoDropzoneDrop(event)">
-          <span class="note" style="display:block; margin-bottom:4px;">Extract from a photo — drag one here, or</span>
+          <span class="note">Drag a photo here, or</span>
           <button type="button" class="btn btn-ghost btn-small" onclick="document.getElementById('yf-photo').click()">${ICONS.upload} Upload photo</button>
-          <input id="yf-photo" type="file" accept="image/*" style="display:none" onchange="handlePhotoUpload(event)" />
-          <span id="yf-extracting" class="note" style="display:none; margin-left:8px;">Clustering colors…</span>
-          <div id="yf-swatches" class="swatch-row"></div>
+          <input id="yf-photo" type="file" accept="image/*,.heic,.heif" style="display:none" onchange="handlePhotoUpload(event)" />
         </div>
+        <span id="yf-extracting" class="note" style="display:none; margin-top:8px;">Clustering colors…</span>
+        <div id="yf-swatches" class="swatch-row"></div>
       </div>`;
   }
 
@@ -927,16 +958,17 @@ function buildColorSectionHTML(){
     <div class="conic-swatch" style="background:${buildConicGradient(pendingYarnColors)};" title="Preview"></div>
     <div style="flex:1; min-width:240px;">
       <div class="color-chip-row">${chips}</div>
+      <div style="display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap;">
+        <input id="yf-new-color" type="color" value="#5C3A72" />
+        <button type="button" class="btn btn-ghost btn-small" onclick="addManualColor()">${ICONS.plus} Add color</button>
+      </div>
       <div class="photo-dropzone" style="margin-top:8px;" ondragover="onPhotoDropzoneDragOver(event)" ondragleave="onPhotoDropzoneDragLeave(event)" ondrop="onPhotoDropzoneDrop(event)">
-        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          <input id="yf-new-color" type="color" value="#5C3A72" />
-          <button type="button" class="btn btn-ghost btn-small" onclick="addManualColor()">${ICONS.plus} Add color</button>
-          <button type="button" class="btn btn-ghost btn-small" onclick="document.getElementById('yf-photo-multi').click()">${ICONS.upload} Upload photo</button>
-          <input id="yf-photo-multi" type="file" accept="image/*" style="display:none" onchange="handleMulticolorPhotoUpload(event)" />
-          <span class="note">or drag a photo onto this box</span>
-        </div>
-        <span id="yf-multi-extracting" class="note" style="display:none;">Clustering colors…</span>
-        <div id="yf-multi-swatches" class="swatch-row">${multicolorExtractedSwatches.map(s=>`<button type="button" class="swatch-btn" style="background:${s.hex}" title="Tap to add ${s.hex}" onclick="addExtractedMulticolor('${s.hex}')"></button>`).join('')}</div>
+        <span class="note">Drag a photo here, or</span>
+        <button type="button" class="btn btn-ghost btn-small" onclick="document.getElementById('yf-photo-multi').click()">${ICONS.upload} Upload photo</button>
+        <input id="yf-photo-multi" type="file" accept="image/*,.heic,.heif" style="display:none" onchange="handleMulticolorPhotoUpload(event)" />
+      </div>
+      <span id="yf-multi-extracting" class="note" style="display:none; margin-top:8px;">Clustering colors…</span>
+      <div id="yf-multi-swatches" class="swatch-row">${multicolorExtractedSwatches.map(s=>`<button type="button" class="swatch-btn" style="background:${s.hex}" title="Tap to add ${s.hex}" onclick="addExtractedMulticolor('${s.hex}')"></button>`).join('')}</div>
       </div>
       ${modeControl}
     </div>`;
@@ -983,10 +1015,13 @@ function handleMulticolorPhotoUpload(e){
   const file = e.target.files[0];
   if(file) processMulticolorPhotoFile(file);
 }
-function processMulticolorPhotoFile(file){
+async function processMulticolorPhotoFile(file){
   document.getElementById('yf-multi-extracting').style.display = 'inline';
+  let usable;
+  try{ usable = await toRenderableImageBlob(file); }
+  catch(err){ document.getElementById('yf-multi-extracting').style.display = 'none'; alert(err.message); return; }
   const img = new Image();
-  const url = URL.createObjectURL(file);
+  const url = URL.createObjectURL(usable);
   img.onload = () => {
     const size = 50;
     const canvas = document.createElement('canvas');
@@ -1001,6 +1036,7 @@ function processMulticolorPhotoFile(file){
     refreshColorSection();
     URL.revokeObjectURL(url);
   };
+  img.onerror = () => { document.getElementById('yf-multi-extracting').style.display = 'none'; URL.revokeObjectURL(url); alert('Could not read that photo.'); };
   img.src = url;
 }
 
@@ -1010,7 +1046,7 @@ function onPhotoDropzoneDrop(e){
   e.preventDefault();
   e.currentTarget.classList.remove('dragover');
   const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-  if(!file || !file.type.startsWith('image/')) return;
+  if(!isAcceptableImageFile(file)) return;
   if(pendingYarnIsMulticolor) processMulticolorPhotoFile(file);
   else processSinglePhotoFile(file);
 }
@@ -1201,9 +1237,12 @@ function buildProjectPhotosHTML(){
   return `
     <div class="photo-thumb-row">${thumbs}</div>
     ${canAddMore
-      ? `<button type="button" class="btn btn-ghost btn-small" onclick="document.getElementById('pf-photo-input').click()">${ICONS.upload} Add photo (${pendingProjectPhotos.length}/3)</button>
-         <input id="pf-photo-input" type="file" accept="image/*" style="display:none" onchange="handleProjectPhotoUpload(event)" />
-         <span id="pf-photo-status" class="note" style="display:none; margin-left:8px;">Uploading…</span>`
+      ? `<div class="photo-dropzone" ondragover="onPhotoDropzoneDragOver(event)" ondragleave="onPhotoDropzoneDragLeave(event)" ondrop="onProjectPhotoDrop(event)">
+           <span class="note">Drag a photo here, or</span>
+           <button type="button" class="btn btn-ghost btn-small" onclick="document.getElementById('pf-photo-input').click()">${ICONS.upload} Add photo (${pendingProjectPhotos.length}/3)</button>
+           <input id="pf-photo-input" type="file" accept="image/*,.heic,.heif" style="display:none" onchange="handleProjectPhotoUpload(event)" />
+         </div>
+         <p id="pf-photo-status" class="note" style="display:none; text-align:center; margin-top:6px;">Uploading…</p>`
       : `<p class="note">Maximum of 3 photos for this project.</p>`}
   `;
 }
@@ -1211,20 +1250,30 @@ function refreshProjectPhotos(){
   const el = document.getElementById('pf-photos');
   if(el) el.innerHTML = buildProjectPhotosHTML();
 }
-async function handleProjectPhotoUpload(e){
+function handleProjectPhotoUpload(e){
   const file = e.target.files[0];
   e.target.value = '';
-  if(!file || !file.type.startsWith('image/')) return;
+  if(file) processProjectPhotoFile(file);
+}
+function onProjectPhotoDrop(e){
+  e.preventDefault();
+  e.currentTarget.classList.remove('dragover');
+  const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if(file) processProjectPhotoFile(file);
+}
+async function processProjectPhotoFile(file){
+  if(!isAcceptableImageFile(file)) return;
   if(pendingProjectPhotos.length >= 3 || !STATE.user) return;
   const statusEl = document.getElementById('pf-photo-status');
-  if(statusEl) statusEl.style.display = 'inline';
+  if(statusEl) statusEl.style.display = 'block';
   try{
-    const blob = await compressImageFile(file);
+    const usable = await toRenderableImageBlob(file);
+    const blob = await compressImageFile(usable);
     const url = await window.FB.uploadProjectPhoto(STATE.user.uid, STATE.editingProjectId, blob, `${uid()}.jpg`);
     pendingProjectPhotos.push(url);
   }catch(err){
     console.error('Photo upload failed', err);
-    alert("Couldn't upload that photo — check your connection and try again.");
+    alert(err.message || "Couldn't upload that photo — check your connection and try again.");
   }
   refreshProjectPhotos();
 }
@@ -1656,10 +1705,13 @@ function renderPalette(){
 ================================================================= */
 function renderShowcase(){
   const finished = STATE.projects.filter(p=>p.status==='Finished');
+  let html = STATE.showProjectForm ? renderProjectForm() : '';
   if(finished.length===0){
-    return `<div class="empty"><p class="title">Nothing finished yet</p><p class="body">Once a project's status is set to Finished, it shows up here. Add a photo or two from the project's edit screen to make this a real gallery.</p></div>`;
+    html += `<div class="empty"><p class="title">Nothing finished yet</p><p class="body">Once a project's status is set to Finished, it shows up here. Add a photo or two right from its card to make this a real gallery.</p></div>`;
+  } else {
+    html += `<div class="showcase-grid">${finished.map(renderShowcaseCard).join('')}</div>`;
   }
-  return `<div class="showcase-grid">${finished.map(renderShowcaseCard).join('')}</div>`;
+  return html;
 }
 function renderShowcaseCard(p){
   const usedYarns = STATE.yarns.filter(y => (p.yarnIds||[]).includes(y.id));
@@ -1672,7 +1724,10 @@ function renderShowcaseCard(p){
       ? `<img class="showcase-photo" src="${esc(mainImage)}" alt="${esc(p.name)}" />`
       : `<div class="showcase-placeholder">No photo yet</div>`}
     <div class="showcase-body">
-      <p style="margin:0; font-weight:600; font-family:'Fraunces',serif;">${esc(p.name)}</p>
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+        <p style="margin:0; font-weight:600; font-family:'Fraunces',serif;">${esc(p.name)}</p>
+        <button class="del-btn" onclick="showProjectForm('${p.id}')" aria-label="Edit project, add photos" title="Edit / add photos" style="flex-shrink:0;">${ICONS.pencil}</button>
+      </div>
       ${p.patternName ? `<p class="note" style="margin:2px 0 0;">${esc(p.patternName)}</p>` : ''}
       <div style="display:flex; align-items:center; gap:6px; margin-top:8px; flex-wrap:wrap;">
         ${usedYarns.map(y=>`<span class="dot" style="background:${y.colorHex}" title="${esc(y.name)}"></span>`).join('')}
