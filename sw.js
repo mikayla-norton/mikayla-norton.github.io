@@ -16,7 +16,7 @@
    line for avoiding "I deployed a fix but still see the old app".
 */
 
-const CACHE_VERSION = 'woolgather-v2';
+const CACHE_VERSION = 'woolgather-v3';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const PHOTO_CACHE = `${CACHE_VERSION}-photos`;
 
@@ -34,6 +34,10 @@ const SHELL_ASSETS = [
 const CDN_ASSETS = [
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js',
   'https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js',
+  'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js',
+  'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js',
+  'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js',
+  'https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js',
 ];
 
 self.addEventListener('install', (event) => {
@@ -131,11 +135,15 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Shell assets + CDN libs: cache-first, fall back to network.
+  // Note we match ALL of gstatic.com (not just the Firebase entry files),
+  // because the Firebase SDK modules pull in additional @firebase/* chunks
+  // from gstatic at runtime — those must be cached too or offline import fails.
   if (
     url.origin === self.location.origin ||
     CDN_ASSETS.some((u) => req.url.startsWith(u.split('?')[0])) ||
     url.hostname.includes('fonts.googleapis.com') ||
     url.hostname.includes('fonts.gstatic.com') ||
+    url.hostname.includes('www.gstatic.com') ||
     url.hostname.includes('cdn.jsdelivr.net')
   ) {
     event.respondWith((async () => {

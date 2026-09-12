@@ -2151,7 +2151,20 @@ function dismissIosHint(){
 }
 
 if(window.FB){ initApp(); }
-else { window.addEventListener('firebase-ready', initApp, { once:true }); }
+else {
+  window.addEventListener('firebase-ready', initApp, { once:true });
+  // If the Firebase SDK never loads (e.g. offline before it was cached),
+  // don't hang on a blank screen — show a readable message after a delay.
+  setTimeout(() => {
+    if(!window.FB){
+      const app = document.getElementById('app');
+      if(app) app.innerHTML = `<div class="wrap"><div class="empty" style="margin-top:40px;">
+        <p class="title">Couldn't finish loading</p>
+        <p class="body">Woolgather needs to connect once while online to finish setting up offline mode. Please reopen the app with a connection, then it'll work offline afterward.</p>
+      </div></div>`;
+    }
+  }, 6000);
+}
 
 /* ---- Service worker registration + update handling ----
    Registers /sw.js (must sit at the site root so it can control the whole
