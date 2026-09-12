@@ -4,6 +4,18 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Woolgather — a stash &amp; project ledger</title>
+
+<!-- ===== PWA / installability ===== -->
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="theme-color" content="#5C3A72" />
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
+<!-- iOS: no manifest icon support, needs its own apple-touch-icon + web-app tags -->
+<link rel="apple-touch-icon" href="/icons/icon-180.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Woolgather" />
+<meta name="mobile-web-app-capable" content="yes" />
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
@@ -207,6 +219,17 @@
   .chip-star{ background:none; border:none; cursor:pointer; font-size:0.8rem; color:var(--border); padding:0 2px; }
   .chip-star.active{ color:var(--plum); }
   .chip-remove{ background:none; border:none; cursor:pointer; font-size:0.7rem; color:var(--ink-soft); padding:0 2px; }
+  /* Touch-only reorder arrows — hidden by default (mouse users drag instead),
+     shown only on coarse-pointer (touch) devices regardless of screen size. */
+  .chip-move{ display:none; }
+  @media (pointer: coarse){
+    .color-chip{ cursor:default; }
+    .chip-move{ display:inline-flex; align-items:center; justify-content:center; background:none; border:none; cursor:pointer; color:var(--ink-soft); font-size:1rem; line-height:1; min-width:32px; min-height:32px; padding:0; }
+    .chip-move:disabled{ opacity:0.25; cursor:default; }
+    /* roomier tap targets for the other chip controls on touch */
+    .chip-star{ min-width:32px; min-height:32px; font-size:1rem; }
+    .chip-remove{ min-width:32px; min-height:32px; font-size:0.9rem; }
+  }
 
   .yarn-picker{ display:flex; flex-wrap:wrap; gap:8px; max-height:130px; overflow-y:auto; padding:8px; border:1px solid var(--border); border-radius:6px; }
   .yarn-chip{ display:inline-flex; align-items:center; gap:6px; font-size:0.75rem; padding:4px 9px; border-radius:999px; border:1px solid var(--border); background:transparent; cursor:pointer; color:var(--ink); }
@@ -344,6 +367,19 @@
   @media (max-width:420px){
     .showcase-grid{ grid-template-columns:1fr; }
   }
+
+  /* iOS "add to home screen" hint — only shown via JS on iOS Safari when
+     not already installed. Dismissible, and remembers dismissal. */
+  .ios-install-hint{
+    position:fixed; left:12px; right:12px; bottom:12px; z-index:70;
+    background:var(--card); border:1px solid var(--border); border-radius:14px;
+    padding:14px 16px; box-shadow:0 6px 24px rgba(0,0,0,0.18);
+    display:flex; align-items:flex-start; gap:12px; font-size:0.85rem;
+    padding-bottom:calc(14px + env(safe-area-inset-bottom, 0));
+  }
+  .ios-install-hint .ih-icon{ width:34px; height:34px; border-radius:8px; flex-shrink:0; }
+  .ios-install-hint .ih-close{ background:none; border:none; color:var(--ink-soft); font-size:1.1rem; cursor:pointer; padding:0 2px; flex-shrink:0; }
+  .ios-install-hint b{ color:var(--ink); }
 </style>
 </head>
 <body>
@@ -1143,9 +1179,11 @@ function buildColorSectionHTML(){
     <div class="color-chip" draggable="true" data-index="${i}"
          ondragstart="onColorDragStart(event)" ondragover="onColorDragOver(event)"
          ondrop="onColorDrop(event)" ondragend="onColorDragEnd(event)">
+      <button type="button" class="chip-move" title="Move left" onclick="moveColor(${i},-1)" ${i===0?'disabled':''} aria-label="Move color left">‹</button>
       <span class="color-chip-swatch" style="background:${hex}; ${i===pendingYarnPrimaryIndex ? 'outline:2px solid var(--plum); outline-offset:2px;' : ''}"></span>
       <button type="button" class="chip-star ${i===pendingYarnPrimaryIndex?'active':''}" title="Set as primary color (used for Palette Lab matching)" onclick="setPrimaryColor(${i})">★</button>
       <button type="button" class="chip-remove" title="Remove this color" onclick="removeMulticolorColor(${i})">✕</button>
+      <button type="button" class="chip-move" title="Move right" onclick="moveColor(${i},1)" ${i===pendingYarnColors.length-1?'disabled':''} aria-label="Move color right">›</button>
     </div>`).join('');
 
   const count = pendingYarnColors.length;
@@ -1195,6 +1233,20 @@ function removeMulticolorColor(i){
   refreshColorSection();
 }
 function setPrimaryColor(i){ pendingYarnPrimaryIndex = i; refreshColorSection(); }
+
+/* Touch reorder: swap the color at index i with its neighbor (dir -1 left,
+   +1 right). Keeps the primary-color designation attached to whichever
+   physical color it was on. Same end result as a drag of one position. */
+function moveColor(i, dir){
+  const j = i + dir;
+  if(j < 0 || j >= pendingYarnColors.length) return;
+  const tmp = pendingYarnColors[i];
+  pendingYarnColors[i] = pendingYarnColors[j];
+  pendingYarnColors[j] = tmp;
+  if(pendingYarnPrimaryIndex === i) pendingYarnPrimaryIndex = j;
+  else if(pendingYarnPrimaryIndex === j) pendingYarnPrimaryIndex = i;
+  refreshColorSection();
+}
 
 function onColorDragStart(e){
   colorDragSrcIndex = Number(e.currentTarget.dataset.index);
@@ -2053,7 +2105,35 @@ function initApp(){
       STATE.projects = [];
     }
     render();
+    maybeShowIosInstallHint();
   });
+}
+
+/* iOS Safari gives no install prompt — show a gentle, dismissible hint on
+   how to Add to Home Screen. Only on iOS, only in a browser tab (not when
+   already launched as an installed app), and only once (dismissal sticks
+   via localStorage — used purely for this UI preference, not app data). */
+function maybeShowIosInstallHint(){
+  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone = window.navigator.standalone === true ||
+    window.matchMedia('(display-mode: standalone)').matches;
+  let dismissed = false;
+  try{ dismissed = localStorage.getItem('wg-ios-hint-dismissed') === '1'; }catch(e){}
+  if(!isIos || isStandalone || dismissed) return;
+  if(document.getElementById('ios-install-hint')) return;
+  const el = document.createElement('div');
+  el.className = 'ios-install-hint';
+  el.id = 'ios-install-hint';
+  el.innerHTML = `
+    <img class="ih-icon" src="/icons/icon-180.png" alt="" />
+    <div>Install Woolgather: tap the <b>Share</b> button, then <b>Add to Home Screen</b>.</div>
+    <button class="ih-close" onclick="dismissIosHint()" aria-label="Dismiss">✕</button>`;
+  document.body.appendChild(el);
+}
+function dismissIosHint(){
+  try{ localStorage.setItem('wg-ios-hint-dismissed','1'); }catch(e){}
+  const el = document.getElementById('ios-install-hint');
+  if(el) el.remove();
 }
 
 if(window.FB){ initApp(); }
