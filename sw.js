@@ -16,7 +16,7 @@
    line for avoiding "I deployed a fix but still see the old app".
 */
 
-const CACHE_VERSION = 'woolgather-v1';
+const CACHE_VERSION = 'woolgather-v2';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const PHOTO_CACHE = `${CACHE_VERSION}-photos`;
 
@@ -109,14 +109,22 @@ self.addEventListener('fetch', (event) => {
 
   // Navigations (loading the app itself): network-first so you get the
   // latest when online, falling back to the cached shell when offline.
+  // The fallback is deliberately forgiving — iOS may launch the installed
+  // app with a slightly different URL (query params, or "/" instead of the
+  // full filename), so we ignore the query string and, as a last resort,
+  // return the cached shell for ANY navigation rather than 404-ing offline.
   if (req.mode === 'navigate') {
     event.respondWith((async () => {
       try {
-        const resp = await fetch(req);
-        return resp;
+        return await fetch(req);
       } catch (e) {
         const cache = await caches.open(SHELL_CACHE);
-        return (await cache.match('/woolgather.html')) || Response.error();
+        return (
+          (await cache.match(req, { ignoreSearch: true })) ||
+          (await cache.match('/woolgather.html', { ignoreSearch: true })) ||
+          (await cache.match('/', { ignoreSearch: true })) ||
+          Response.error()
+        );
       }
     })());
     return;

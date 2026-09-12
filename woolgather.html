@@ -275,6 +275,7 @@
   .palette-swatch{ width:64px; height:64px; border-radius:50%; border:1px solid var(--border); }
   .harmony-btn{ font-size:0.75rem; padding:6px 12px; border-radius:999px; border:1px solid var(--border); background:none; cursor:pointer; color:var(--ink-soft); }
   .harmony-btn.active{ background:var(--plum); border-color:var(--plum); color:#fff; }
+  .palette-base-select{ width:100%; max-width:100%; box-sizing:border-box; text-overflow:ellipsis; }
 
   .brand-hint{ font-size:0.72rem; color:var(--ink-soft); margin-top:-6px; }
   .note{ font-size:0.8rem; color:var(--ink-soft); }
@@ -1949,8 +1950,8 @@ function renderPalette(){
 
   return `
   <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end; margin-bottom:18px;">
-    <label class="field">Base yarn
-      <select onchange="STATE.paletteBaseId=this.value; renderTab();">
+    <label class="field" style="flex:1; min-width:0; max-width:100%;">Base yarn
+      <select class="palette-base-select" onchange="STATE.paletteBaseId=this.value; renderTab();">
         ${colored.map(y=>`<option value="${y.id}" ${y.id===base.id?'selected':''}>${esc(yarnDisplayName(y))}</option>`).join('')}
       </select>
     </label>
