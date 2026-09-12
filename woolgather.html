@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Woolgather — a stash &amp; project ledger</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -253,8 +253,8 @@
   ============================================================ */
   .mobile-nav, .fab, .sheet-backdrop{ display:none; }
 
-  @media (max-width:760px){
-    .wrap{ padding:16px 14px 96px; }           /* leave room for bottom nav */
+  @media (max-width:760px), (max-height:550px) and (max-width:950px){
+    .wrap{ padding:16px max(20px, env(safe-area-inset-left)) 96px max(20px, env(safe-area-inset-right)); }  /* room for bottom nav; respect landscape notch/safe areas */
     .header-tagline{ display:none; }           /* reclaim top space on phones */
     .header-actions{ display:none; }           /* moves to Settings in More */
     .app-header{ margin-bottom:16px; }
@@ -372,7 +372,7 @@ const LINK_PREVIEW_ENDPOINT = "REPLACE_ME_LINK_PREVIEW_URL";
 function isAdmin(){ return !!(STATE.user && STATE.user.email === ADMIN_EMAIL); }
 /* True when the viewport is in mobile layout territory — matches the CSS
    breakpoint so JS behavior and CSS stay in agreement. */
-function isMobile(){ return window.matchMedia('(max-width:760px)').matches; }
+function isMobile(){ return window.matchMedia('(max-width:760px), (max-height:550px) and (max-width:950px)').matches; }
 /* On mobile, forms are elevated into a full-screen slide-up overlay with
    their own Cancel/Save bar. On desktop this is a no-op passthrough so the
    form stays inline exactly as before. `saveCall`/`cancelCall` are the JS
@@ -1016,13 +1016,11 @@ function renderYarnForm(){
     <label class="field">Purchase date (optional estimate)
       <input id="yf-purchasedate" type="date" value="${v('purchaseDate')}" />
     </label>
-    <div></div>
 
-    <label class="field" style="flex-direction:row; align-items:center; justify-content:flex-start; gap:8px; text-align:left;">
+    <label class="field span2" style="flex-direction:row; align-items:center; justify-content:flex-start; gap:8px; text-align:left;">
       <input type="checkbox" id="yf-multicolor" ${pendingYarnIsMulticolor?'checked':''} onchange="toggleMulticolor(this.checked)" style="width:auto; flex-shrink:0;" />
       <span style="color:var(--ink);">This yarn is multicolor (variegated / self-striping / speckled)</span>
     </label>
-    <div></div>
 
     <div class="span2" id="yf-color-section" style="display:flex; flex-wrap:wrap; align-items:center; gap:14px;">
       ${buildColorSectionHTML()}
