@@ -139,14 +139,6 @@
   .empty p.body{ font-size:0.88rem; color:var(--ink-soft); max-width:420px; margin:0; }
 
   label.field{ display:flex; flex-direction:column; gap:4px; font-size:0.85rem; color:var(--ink-soft); }
-  label.field,
-  label.field select,
-  label.field input,
-  label.field textarea {
-    min-width: 0;
-    max-width: 100%;
-    box-sizing: border-box;
-  }
   input,select,textarea{
     font-family:inherit; font-size:0.87rem; padding:7px 10px; border-radius:6px; border:1px solid var(--border);
     background:rgba(255,255,255,0.6); color:var(--ink);
@@ -243,19 +235,7 @@
   .link-preview-chip button{ background:none; border:none; color:var(--ink-soft); cursor:pointer; padding:0; }
 
   .palette-picks{ display:flex; flex-wrap:wrap; gap:32px; justify-content:center; padding:26px; }
-  .palette-pick{
-    display:flex;
-    flex-direction:column;
-    align-items:center;
-    gap:8px;
-    min-width:0;
-    max-width:100%;
-    text-align:center;
-  }
-  .palette-pick p{
-    max-width:100%;
-    overflow-wrap:anywhere;
-  }  
+  .palette-pick{ display:flex; flex-direction:column; align-items:center; gap:8px; }
   .palette-swatch{ width:64px; height:64px; border-radius:50%; border:1px solid var(--border); }
   .harmony-btn{ font-size:0.75rem; padding:6px 12px; border-radius:999px; border:1px solid var(--border); background:none; cursor:pointer; color:var(--ink-soft); }
   .harmony-btn.active{ background:var(--plum); border-color:var(--plum); color:#fff; }
@@ -263,6 +243,107 @@
   .brand-hint{ font-size:0.72rem; color:var(--ink-soft); margin-top:-6px; }
   .note{ font-size:0.8rem; color:var(--ink-soft); }
   ::selection{ background:#9B7EC055; }
+
+  /* ============================================================
+     MOBILE — bottom nav, FAB, sheets, full-screen forms.
+     Everything above is the untouched desktop layout; these
+     rules only take effect at <=760px so wide screens are
+     unaffected. Mobile-only chrome is display:none by default
+     and switched on inside the media query.
+  ============================================================ */
+  .mobile-nav, .fab, .sheet-backdrop{ display:none; }
+
+  @media (max-width:760px){
+    .wrap{ padding:16px 14px 96px; }           /* leave room for bottom nav */
+    .header-tagline{ display:none; }           /* reclaim top space on phones */
+    .header-actions{ display:none; }           /* moves to Settings in More */
+    .app-header{ margin-bottom:16px; }
+    .app-header h1{ font-size:1.6rem; }
+    nav.tabs{ display:none; }                   /* desktop tab row hidden */
+
+    /* bottom nav bar */
+    .mobile-nav{
+      display:flex; position:fixed; left:0; right:0; bottom:0; z-index:40;
+      background:var(--card); border-top:1px solid var(--border);
+      padding-bottom:env(safe-area-inset-bottom, 0);
+    }
+    .mobile-nav button{
+      flex:1; background:none; border:none; font-family:inherit; cursor:pointer;
+      display:flex; flex-direction:column; align-items:center; gap:2px;
+      padding:8px 2px 9px; color:var(--ink-soft); font-size:0.6rem; font-weight:500;
+    }
+    .mobile-nav button.active{ color:var(--plum); }
+    .mobile-nav .icon{ width:21px; height:21px; }
+
+    /* floating add button */
+    .fab{
+      display:flex; position:fixed; right:16px; bottom:74px; z-index:41;
+      width:52px; height:52px; border-radius:50%; background:var(--plum); color:#fff;
+      border:none; cursor:pointer; align-items:center; justify-content:center;
+      box-shadow:0 4px 16px rgba(92,58,114,0.45);
+      margin-bottom:env(safe-area-inset-bottom, 0);
+    }
+    .fab .icon{ width:26px; height:26px; }
+
+    /* slide-up sheets (More / Settings) */
+    .sheet-backdrop{
+      display:flex; position:fixed; inset:0; z-index:50;
+      background:rgba(0,0,0,0.34); align-items:flex-end;
+      opacity:0; pointer-events:none; transition:opacity 0.2s;
+    }
+    .sheet-backdrop.open{ opacity:1; pointer-events:auto; }
+    .sheet{
+      width:100%; background:var(--card); border-radius:18px 18px 0 0;
+      padding:8px 0 calc(14px + env(safe-area-inset-bottom, 0));
+      transform:translateY(100%); transition:transform 0.28s cubic-bezier(.4,0,.2,1);
+    }
+    .sheet-backdrop.open .sheet{ transform:translateY(0); }
+    .sheet-handle{ width:38px; height:4px; background:var(--border); border-radius:2px; margin:8px auto 12px; }
+    .sheet button{
+      width:100%; background:none; border:none; text-align:left; cursor:pointer;
+      padding:14px 22px; font-family:inherit; font-size:0.95rem; color:var(--ink);
+      display:flex; align-items:center; gap:14px;
+    }
+    .sheet button.active{ color:var(--plum); font-weight:600; }
+    .sheet button .icon{ width:20px; height:20px; }
+    .sheet-divider{ height:1px; background:var(--border); margin:6px 22px; }
+
+    /* full-screen slide-up forms */
+    .fullscreen-form{
+      position:fixed; inset:0; z-index:60; background:var(--bg);
+      display:flex; flex-direction:column;
+      animation:formSlideUp 0.3s cubic-bezier(.4,0,.2,1);
+    }
+    @keyframes formSlideUp{ from{ transform:translateY(100%); } to{ transform:translateY(0); } }
+    .fullscreen-form .fs-bar{
+      display:flex; align-items:center; justify-content:space-between; flex-shrink:0;
+      padding:12px 16px calc(12px); padding-top:calc(12px + env(safe-area-inset-top, 0));
+      background:var(--card); border-bottom:1px solid var(--border);
+    }
+    .fullscreen-form .fs-bar .fs-title{ font-family:'Fraunces',serif; font-weight:600; font-size:1rem; }
+    .fullscreen-form .fs-bar button{ background:none; border:none; font-family:inherit; font-size:0.9rem; cursor:pointer; padding:4px 2px; }
+    .fullscreen-form .fs-bar .fs-cancel{ color:var(--ink-soft); }
+    .fullscreen-form .fs-bar .fs-save{ color:var(--plum); font-weight:600; }
+    .fullscreen-form .fs-body{ flex:1; overflow-y:auto; padding:16px 16px calc(24px + env(safe-area-inset-bottom, 0)); }
+    /* inside a full-screen form, the grid always stacks and the in-form action row hides
+       (the top bar's Save/Cancel take over) */
+    .fullscreen-form .form-grid{ grid-template-columns:1fr; display:grid; }
+    .fullscreen-form .form-actions-inline{ display:none; }
+
+    /* forms that are NOT elevated to full-screen still stack cleanly */
+    .form-grid{ grid-template-columns:1fr; }
+    .stat-grid{ grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .chart-grid{ grid-template-columns:1fr; }
+    .yarn-grid{ grid-template-columns:1fr; }
+    .showcase-grid{ grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+
+    body.form-open{ overflow:hidden; }          /* lock background scroll while a full-screen form is up */
+    body.form-open .fab, body.form-open .mobile-nav{ display:none; }  /* hide app chrome behind full-screen form */
+  }
+
+  @media (max-width:420px){
+    .showcase-grid{ grid-template-columns:1fr; }
+  }
 </style>
 </head>
 <body>
@@ -289,6 +370,29 @@ const ADMIN_EMAIL = "miknorton19@gmail.com";
    back to a plain bookmark card with the domain name, same as before. */
 const LINK_PREVIEW_ENDPOINT = "REPLACE_ME_LINK_PREVIEW_URL";
 function isAdmin(){ return !!(STATE.user && STATE.user.email === ADMIN_EMAIL); }
+/* True when the viewport is in mobile layout territory — matches the CSS
+   breakpoint so JS behavior and CSS stay in agreement. */
+function isMobile(){ return window.matchMedia('(max-width:760px)').matches; }
+/* On mobile, forms are elevated into a full-screen slide-up overlay with
+   their own Cancel/Save bar. On desktop this is a no-op passthrough so the
+   form stays inline exactly as before. `saveCall`/`cancelCall` are the JS
+   the top bar's buttons fire; the form's own submit still works too. */
+function wrapFormForMobile(innerHTML, title, saveCall, cancelCall){
+  if(!isMobile()) return innerHTML;
+  return `<div class="fullscreen-form">
+    <div class="fs-bar">
+      <button class="fs-cancel" onclick="${cancelCall}">Cancel</button>
+      <span class="fs-title">${esc(title)}</span>
+      <button class="fs-save" onclick="${saveCall}">Save</button>
+    </div>
+    <div class="fs-body">${innerHTML}</div>
+  </div>`;
+}
+/* Lock/unlock background scroll when a full-screen form is showing. */
+function syncFormScrollLock(){
+  const anyFormOpen = (STATE.showYarnForm || STATE.showProjectForm) && isMobile();
+  document.body.classList.toggle('form-open', anyFormOpen);
+}
 
 /* Curated brand/line presets — approximate specs, always double-check the ball band.
    Stored as a flat array (not nested) so it maps cleanly onto a Firestore array-of-maps
@@ -326,6 +430,7 @@ let STATE = {
   showProjectForm: false,
   editingYarnId: null,
   editingProjectId: null,
+  settingsOpen: false,
   paletteBaseId: null,
   paletteHarmony: 'Complementary'
 };
@@ -559,61 +664,137 @@ const ICONS = {
   link: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/></svg>',
   pencil: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
   bookmark: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>',
-  image: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>'
+  image: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
+  dots: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="5" cy="12" r="0.6"/><circle cx="12" cy="12" r="0.6"/><circle cx="19" cy="12" r="0.6"/></svg>',
+  gear: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'
 };
 
 /* =================================================================
    Master render
 ================================================================= */
+/* Central tab registry — drives both the desktop tab bar and the mobile
+   bottom nav. `primary:true` tabs get a permanent slot in the mobile
+   bottom bar; the rest live in the "More" sheet. `addLabel` (when set)
+   is what the floating + button does on that tab. */
+function tabRegistry(){
+  const tabs = [
+    { id:'overview', label:'Overview', icon:ICONS.clipboard, primary:true },
+    { id:'stash', label:'Stash', icon:ICONS.package, primary:true, addLabel:'Add yarn' },
+    { id:'projects', label:'Projects', icon:ICONS.sparkles, primary:true, addLabel:'Add project' },
+    { id:'palette', label:'Palette lab', icon:ICONS.palette },
+    { id:'showcase', label:'Showcase', icon:ICONS.image, addLabel:'Add project' },
+  ];
+  if(isAdmin()) tabs.push({ id:'presets', label:'Presets', icon:ICONS.bookmark });
+  return tabs;
+}
+
 function render(){
   const app = document.getElementById('app');
 
-  const headerRight = !STATE.authChecked ? ''
-    : STATE.user
-      ? `<div style="display:flex; align-items:center; gap:12px;">
-           <span class="note">${esc(STATE.user.displayName || STATE.user.email || 'Signed in')}</span>
-           <button class="btn btn-ghost btn-small" onclick="window.FB.signOutUser()">Sign out</button>
-           <button class="reset-btn" onclick="resetAll()">${ICONS.reset} Clear my data</button>
-         </div>`
-      : '';
+  if(!STATE.authChecked){
+    app.innerHTML = `<div class="wrap"><p class="note">Connecting…</p></div>`;
+    return;
+  }
+  if(!STATE.user){
+    app.innerHTML = `<div class="wrap">
+      <header class="app-header">
+        <div><h1>Woolgather</h1><p>A quiet ledger for yarn, thread, and the projects they become.</p></div>
+      </header>
+      ${renderSignedOut()}
+    </div>`;
+    return;
+  }
+
+  const tabs = tabRegistry();
+  const desktopTabs = tabs.map(t =>
+    `<button class="${STATE.tab===t.id?'active':''}" onclick="switchTab('${t.id}')">${t.icon} ${t.label}</button>`
+  ).join('');
+
+  // Desktop header actions (hidden on mobile via CSS; mobile uses Settings in More)
+  const headerRight = `<div class="header-actions">
+       <span class="note">${esc(STATE.user.displayName || STATE.user.email || 'Signed in')}</span>
+       <button class="btn btn-ghost btn-small" onclick="window.FB.signOutUser()">Sign out</button>
+       <button class="reset-btn" onclick="resetAll()">${ICONS.reset} Clear my data</button>
+     </div>`;
 
   app.innerHTML = `
     <div class="wrap">
       <header class="app-header">
         <div>
           <h1>Woolgather</h1>
-          <p>A quiet ledger for yarn, thread, and the projects they become.</p>
+          <p class="header-tagline">A quiet ledger for yarn, thread, and the projects they become.</p>
         </div>
         ${headerRight}
       </header>
-      <div id="tab-content"></div>
+      <nav class="tabs">${desktopTabs}</nav>
+      <div id="inner-tab-content"></div>
     </div>
-  `;
-
-  const content = document.getElementById('tab-content');
-
-  if(!STATE.authChecked){
-    content.innerHTML = `<p class="note">Connecting…</p>`;
-    return;
-  }
-  if(!STATE.user){
-    content.innerHTML = renderSignedOut();
-    return;
-  }
-
-  content.innerHTML = `
-    <nav class="tabs">
-      <button class="${STATE.tab==='overview'?'active':''}" onclick="switchTab('overview')">${ICONS.clipboard} Overview</button>
-      <button class="${STATE.tab==='stash'?'active':''}" onclick="switchTab('stash')">${ICONS.package} Stash</button>
-      <button class="${STATE.tab==='projects'?'active':''}" onclick="switchTab('projects')">${ICONS.sparkles} Projects</button>
-      <button class="${STATE.tab==='palette'?'active':''}" onclick="switchTab('palette')">${ICONS.palette} Palette lab</button>
-      <button class="${STATE.tab==='showcase'?'active':''}" onclick="switchTab('showcase')">${ICONS.image} Showcase</button>
-      ${isAdmin() ? `<button class="${STATE.tab==='presets'?'active':''}" onclick="switchTab('presets')">${ICONS.bookmark} Presets</button>` : ''}
-    </nav>
-    <div id="inner-tab-content"></div>
+    ${renderMobileNav(tabs)}
+    ${renderFab(tabs)}
+    ${renderMoreSheet(tabs)}
   `;
   renderTab();
 }
+
+function renderMobileNav(tabs){
+  const primary = tabs.filter(t=>t.primary);
+  const moreActive = !primary.some(t=>t.id===STATE.tab);
+  const primaryBtns = primary.map(t =>
+    `<button class="${STATE.tab===t.id?'active':''}" onclick="switchTab('${t.id}')">${t.icon}<span>${t.label}</span></button>`
+  ).join('');
+  return `<nav class="mobile-nav">
+    ${primaryBtns}
+    <button class="${moreActive?'active':''}" onclick="openMoreSheet()">${ICONS.dots}<span>More</span></button>
+  </nav>`;
+}
+
+function renderFab(tabs){
+  const current = tabs.find(t=>t.id===STATE.tab);
+  if(!current || !current.addLabel) return '';
+  const action = current.id==='stash' ? 'showYarnForm()' : 'showProjectForm()';
+  return `<button class="fab" onclick="${action}" aria-label="${esc(current.addLabel)}">${ICONS.plus}</button>`;
+}
+
+function renderMoreSheet(tabs){
+  const secondary = tabs.filter(t=>!t.primary);
+  const secItems = secondary.map(t =>
+    `<button class="${STATE.tab===t.id?'active':''}" onclick="switchTab('${t.id}'); closeMoreSheet();">${t.icon}<span>${t.label}</span></button>`
+  ).join('');
+  return `<div class="sheet-backdrop" id="more-sheet" onclick="if(event.target===this)closeMoreSheet()">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      ${secItems}
+      <div class="sheet-divider"></div>
+      <button onclick="closeMoreSheet(); openSettings();">${ICONS.gear}<span>Settings</span></button>
+    </div>
+  </div>`;
+}
+
+function openMoreSheet(){ document.getElementById('more-sheet').classList.add('open'); }
+function closeMoreSheet(){ const s=document.getElementById('more-sheet'); if(s) s.classList.remove('open'); }
+
+function openSettings(){
+  STATE.settingsOpen = true;
+  renderSettingsSheet();
+}
+function renderSettingsSheet(){
+  let existing = document.getElementById('settings-sheet');
+  if(existing) existing.remove();
+  if(!STATE.settingsOpen) return;
+  const div = document.createElement('div');
+  div.className = 'sheet-backdrop open';
+  div.id = 'settings-sheet';
+  div.onclick = (e)=>{ if(e.target===div) closeSettings(); };
+  div.innerHTML = `<div class="sheet">
+    <div class="sheet-handle"></div>
+    <p style="padding:2px 22px 10px; font-family:'Fraunces',serif; font-weight:600;">Settings</p>
+    <p class="note" style="padding:0 22px 10px;">${esc(STATE.user.displayName || STATE.user.email || 'Signed in')}</p>
+    <button onclick="window.FB.signOutUser()">${ICONS.reset}<span>Sign out</span></button>
+    <button onclick="closeSettings(); resetAll();" style="color:var(--wine);">${ICONS.trash}<span>Clear my data</span></button>
+  </div>`;
+  document.getElementById('app').appendChild(div);
+}
+function closeSettings(){ STATE.settingsOpen = false; const s=document.getElementById('settings-sheet'); if(s) s.remove(); }
 
 function renderSignedOut(){
   return `<div class="empty" style="margin-top:24px;">
@@ -635,6 +816,7 @@ function renderTab(){
 
   if(STATE.tab==='overview') renderCharts();
   if(STATE.tab==='stash' && STATE.showYarnForm) wireBrandSelectors();
+  syncFormScrollLock();
 }
 
 function switchTab(tab){
@@ -787,7 +969,7 @@ function renderYarnForm(){
   const editing = STATE.editingYarnId ? STATE.yarns.find(y=>y.id===STATE.editingYarnId) : null;
   const v = (field, fallback='') => editing ? esc(editing[field] ?? fallback) : fallback;
   const brandOptions = presetBrands().map(b=>`<option value="${esc(b)}">${esc(b)}</option>`).join('');
-  return `
+  const inner = `
   <form class="card form-grid" onsubmit="handleSaveYarn(event)" style="margin-bottom:22px;">
     ${editing ? '' : `
     <label class="field">Brand preset (optional)
@@ -836,25 +1018,28 @@ function renderYarnForm(){
     </label>
     <div></div>
 
-    <div class="span2" style="min-width:0;">
-      <label class="field" style="flex-direction:row; align-items:center; justify-content:flex-start; gap:8px; text-align:left; width:fit-content; max-width:100%;">
-        <input type="checkbox" id="yf-multicolor" ${pendingYarnIsMulticolor?'checked':''} onchange="toggleMulticolor(this.checked)" style="width:auto; flex-shrink:0;" />
-        <span style="color:var(--ink); min-width:0;">This yarn is multicolor (variegated / self-striping / speckled)</span>
-      </label>
-    </div>
+    <label class="field" style="flex-direction:row; align-items:center; justify-content:flex-start; gap:8px; text-align:left;">
+      <input type="checkbox" id="yf-multicolor" ${pendingYarnIsMulticolor?'checked':''} onchange="toggleMulticolor(this.checked)" style="width:auto; flex-shrink:0;" />
+      <span style="color:var(--ink);">This yarn is multicolor (variegated / self-striping / speckled)</span>
+    </label>
+    <div></div>
 
     <div class="span2" id="yf-color-section" style="display:flex; flex-wrap:wrap; align-items:center; gap:14px;">
       ${buildColorSectionHTML()}
     </div>
 
-    <div class="span2" style="display:flex; gap:8px; justify-content:flex-end;">
+    <div class="span2 form-actions-inline" style="display:flex; gap:8px; justify-content:flex-end;">
       <button type="button" class="btn btn-ghost" onclick="hideYarnForm()">Cancel</button>
       <button type="submit" class="btn btn-primary">${editing ? 'Save changes' : 'Add to stash'}</button>
     </div>
   </form>`;
+  return wrapFormForMobile(inner, editing ? 'Edit yarn' : 'Add yarn', 'submitYarnForm()', 'hideYarnForm()');
 }
-
-function wireBrandSelectors(){ /* placeholder in case future wiring needed after render */ }
+/* Full-screen form top-bar Save button triggers the real form submit. */
+function submitYarnForm(){
+  const f = document.querySelector('#inner-tab-content form, .fullscreen-form form');
+  if(f) f.requestSubmit ? f.requestSubmit() : f.querySelector('[type=submit]').click();
+}
 
 function onBrandChange(){
   const brand = document.getElementById('yf-brand-select').value;
@@ -1391,7 +1576,7 @@ function renderProjectForm(){
   const isStandardSize = editing && editing.garmentSize && GARMENT_SIZES.includes(editing.garmentSize);
   const isCustomSize = editing && editing.garmentSize && !isStandardSize;
 
-  return `
+  const inner = `
   <form class="card form-grid" onsubmit="handleSaveProject(event)" style="margin-bottom:22px;">
     <label class="field">Project name
       <input id="pf-name" required placeholder="Gift cowl for Dana" value="${v('name')}" />
@@ -1460,11 +1645,16 @@ function renderProjectForm(){
         </span>`).join('')}</div>
     </div>
 
-    <div class="span2" style="display:flex; gap:8px; justify-content:flex-end;">
+    <div class="span2 form-actions-inline" style="display:flex; gap:8px; justify-content:flex-end;">
       <button type="button" class="btn btn-ghost" onclick="hideProjectForm()">Cancel</button>
       <button type="submit" class="btn btn-primary">${editing ? 'Save changes' : 'Add project'}</button>
     </div>
   </form>`;
+  return wrapFormForMobile(inner, editing ? 'Edit project' : 'Add project', 'submitProjectForm()', 'hideProjectForm()');
+}
+function submitProjectForm(){
+  const f = document.querySelector('#inner-tab-content form, .fullscreen-form form');
+  if(f) f.requestSubmit ? f.requestSubmit() : f.querySelector('[type=submit]').click();
 }
 function onGarmentSizeChange(){
   const val = document.getElementById('pf-garment-size').value;
@@ -1695,9 +1885,9 @@ function renderPalette(){
   const unfilledByWeight = results.some(r=>!r.yarn);
 
   return `
-  <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end; margin-bottom:18px; min-width:0;">
-    <label class="field" style="flex:1 1 280px; min-width:0;">Base yarn
-      <select style="width:100%; min-width:0; max-width:100%; box-sizing:border-box;" onchange="STATE.paletteBaseId=this.value; renderTab();">
+  <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end; margin-bottom:18px;">
+    <label class="field">Base yarn
+      <select onchange="STATE.paletteBaseId=this.value; renderTab();">
         ${colored.map(y=>`<option value="${y.id}" ${y.id===base.id?'selected':''}>${esc(yarnDisplayName(y))}</option>`).join('')}
       </select>
     </label>
@@ -1830,6 +2020,20 @@ async function handleAddPreset(){
 ================================================================= */
 function initApp(){
   render(); // shows "Connecting…"
+
+  // Re-render when crossing the mobile/desktop breakpoint so the layout
+  // (bottom nav vs. tab row, full-screen vs. inline forms) stays correct
+  // through rotation/resize. Debounced, and only fires on an actual
+  // breakpoint crossing rather than every pixel of resize.
+  let wasMobile = isMobile();
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      const nowMobile = isMobile();
+      if(nowMobile !== wasMobile){ wasMobile = nowMobile; if(STATE.authChecked && STATE.user) render(); }
+    }, 150);
+  });
 
   window.FB.onAuthChange(async (user) => {
     STATE.authChecked = true;
