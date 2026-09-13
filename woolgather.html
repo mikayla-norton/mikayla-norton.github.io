@@ -20,6 +20,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -332,6 +333,8 @@
   .wg-toast.error{ background:var(--wine); }
   .stash-controls{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
   .stash-controls input, .stash-controls select{ font-size:0.82rem; }
+  .ocr-scan-box{ background:rgba(255,255,255,0.55); border:1px dashed var(--border); border-radius:10px; padding:12px; transition:background 0.15s, border-color 0.15s; }
+  .ocr-scan-box.dragover{ background:rgba(92,58,114,0.08); border-color:var(--plum); }
 
   /* ============================================================
      MOBILE — bottom nav, FAB, sheets, full-screen forms.
@@ -988,6 +991,81 @@ function categorizeFiber(text){
   return "Other / blend";
 }
 
+/* =================================================================
+   Label OCR parsing — turns raw OCR text into confident field guesses.
+   Philosophy (from the trustworthiness research): only fill a field when
+   we're reasonably confident; a blank beats a confident-wrong guess. We
+   reconcile against known vocabulary (brands from presets, weight names,
+   fiber terms) rather than trusting the raw read. The photo → text step
+   is tesseract.js; this function is the "make sense of it" step.
+================================================================= */
+function parseYarnLabel(rawText){
+  const text = rawText || '';
+  const lower = text.toLowerCase();
+  const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
+  const out = { brand:null, line:null, fiber:null, weightCategory:null, skeinYardage:null, skeinWeightGrams:null, colorway:null, dyeLot:null };
+
+  // --- Brand: match against known preset brands (fuzzy, case-insensitive) ---
+  const brands = presetBrands();
+  for(const b of brands){
+    if(lower.includes(b.toLowerCase())){ out.brand = b; break; }
+  }
+  // If brand found, try to find its matching line from presets in the text.
+  if(out.brand){
+    const lines2 = YARN_PRESETS.filter(p=>p.brand===out.brand);
+    for(const p of lines2){
+      if(lower.includes(p.line.toLowerCase())){ out.line = p.line; break; }
+    }
+  }
+
+  // --- Weight category: match known weight words (+ common synonyms) ---
+  const weightSynonyms = {
+    'Lace':['lace','2 ply','2-ply'],
+    'Fingering':['fingering','sock','4 ply','4-ply','super fine'],
+    'Sport':['sport'],
+    'DK':['dk','double knit','light worsted'],
+    'Worsted':['worsted','afghan','medium'],
+    'Aran':['aran','10 ply','10-ply'],
+    'Bulky':['bulky','chunky','12 ply'],
+    'Super Bulky':['super bulky','super chunky','roving']
+  };
+  for(const [cat,syns] of Object.entries(weightSynonyms)){
+    if(syns.some(s=>lower.includes(s))){ out.weightCategory = cat; break; }
+  }
+
+  // --- Fiber: only accept if a known fiber term appears (reuse categorizer) ---
+  const fiberTerms = ['wool','merino','alpaca','cotton','acrylic','silk','linen','flax','mohair','cashmere','bamboo','nylon','polyester','superwash'];
+  if(fiberTerms.some(t=>lower.includes(t))){
+    // Try to grab the actual fiber phrase (e.g. "100% Superwash Merino Wool").
+    const fiberLine = lines.find(l=>/%|\bwool\b|\bcotton\b|\bacrylic\b|\balpaca\b|\bmerino\b/i.test(l) && l.length<60);
+    out.fiber = fiberLine || null;
+  }
+
+  // --- Yardage: look for "### yd/yds/yards" or "### m/meters" ---
+  const ydMatch = text.match(/(\d{2,4})\s*(?:yd|yds|yards|yardage)/i);
+  const mMatch = text.match(/(\d{2,4})\s*(?:m|meter|meters|metres)\b/i);
+  if(ydMatch) out.skeinYardage = Number(ydMatch[1]);
+  else if(mMatch) out.skeinYardage = Math.round(Number(mMatch[1]) * 1.0936); // m→yd
+
+  // --- Skein weight: "### g/grams/gr" or "### oz" ---
+  const gMatch = text.match(/(\d{2,4})\s*(?:g|gr|grams|gramme)\b/i);
+  const ozMatch = text.match(/([\d.]+)\s*(?:oz|ounce)/i);
+  if(gMatch) out.skeinWeightGrams = Number(gMatch[1]);
+  else if(ozMatch) out.skeinWeightGrams = Math.round(Number(ozMatch[1]) * 28.35); // oz→g
+
+  // --- Dye lot: "lot ####" or "dye lot: ####" ---
+  const lotMatch = text.match(/(?:dye\s*lot|lot|batch)\s*[:#]?\s*([A-Za-z0-9-]{2,12})/i);
+  if(lotMatch) out.dyeLot = lotMatch[1];
+
+  // --- Colorway / color number: "color ###" or "colorway: ___" ---
+  const colorMatch = text.match(/(?:colou?rway|colou?r|shade)\s*[:#]?\s*([A-Za-z0-9 -]{1,24})/i);
+  if(colorMatch) out.colorway = colorMatch[1].trim();
+
+  // Confidence: how many fields did we actually resolve?
+  out._fieldsFound = Object.entries(out).filter(([k,v])=>k[0]!=='_' && v!=null && v!=='').length;
+  return out;
+}
+
 /* Icons (minimal hand-drawn line icons) */
 const ICONS = {
   plus: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
@@ -1479,6 +1557,15 @@ function renderYarnForm(){
   const inner = `
   <form class="card form-grid" onsubmit="handleSaveYarn(event)" style="margin-bottom:22px;">
     ${editing ? '' : `
+    <div class="span2 ocr-scan-box" ondragover="onPhotoDropzoneDragOver(event)" ondragleave="onPhotoDropzoneDragLeave(event)" ondrop="onLabelScanDrop(event)">
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span style="font-size:0.85rem; font-weight:500;">${ICONS.image} Scan a label to prefill</span>
+        <button type="button" class="btn btn-ghost btn-small" onclick="document.getElementById('yf-ocr-photo').click()">${ICONS.upload} Choose photo</button>
+        <input id="yf-ocr-photo" type="file" accept="image/*,.heic,.heif" capture="environment" style="display:none" onchange="handleLabelScan(event)" />
+        <span id="yf-ocr-status" class="note" style="display:none;"></span>
+      </div>
+      <p class="note" style="margin:6px 0 0;">Drag a label photo here, or choose one — reads printed text and fills what it's confident about. Always double-check before saving. Works best on a flat, well-lit label.</p>
+    </div>
     <label class="field">Brand preset (optional)
       <select id="yf-brand-select" onchange="onBrandChange()">
         <option value="">Custom / other</option>
@@ -1575,6 +1662,60 @@ function onLineChange(){
 function handlePhotoUpload(e){
   const file = e.target.files[0];
   if(file) processSinglePhotoFile(file);
+}
+
+/* Label OCR: photo → tesseract.js → parseYarnLabel → prefill only the
+   fields we're confident about (leaving others for the user), then show a
+   summary toast. Never overwrites a field the user already typed. */
+async function handleLabelScan(e){
+  const file = e.target.files[0];
+  e.target.value = '';
+  processLabelScan(file);
+}
+function onLabelScanDrop(e){
+  e.preventDefault();
+  e.currentTarget.classList.remove('dragover');
+  const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  processLabelScan(file);
+}
+async function processLabelScan(file){
+  if(!file || !isAcceptableImageFile(file)) return;
+  if(typeof Tesseract === 'undefined'){ wgToast("Couldn't load the label reader — check your connection and try again.", "error"); return; }
+  const statusEl = document.getElementById('yf-ocr-status');
+  const setStatus = (t)=>{ if(statusEl){ statusEl.style.display='inline'; statusEl.textContent=t; } };
+  setStatus('Reading label…');
+  try{
+    const usable = await toRenderableImageBlob(file);
+    const { data } = await Tesseract.recognize(usable, 'eng', {
+      logger: m => { if(m.status==='recognizing text') setStatus(`Reading label… ${Math.round(m.progress*100)}%`); }
+    });
+    const parsed = parseYarnLabel(data.text || '');
+    if(parsed._fieldsFound === 0){
+      setStatus('');
+      wgToast("Couldn't read much from that photo — try a flatter, brighter shot, or enter details manually.", "error");
+      return;
+    }
+    const fillIfEmpty = (id, val)=>{
+      if(val==null || val==='') return false;
+      const el = document.getElementById(id);
+      if(el && !el.value){ el.value = val; return true; }
+      return false;
+    };
+    let filled = 0;
+    if(parsed.brand && fillIfEmpty('yf-brand', parsed.brand)) filled++;
+    if(parsed.line && fillIfEmpty('yf-line', parsed.line)) filled++;
+    if(parsed.fiber && fillIfEmpty('yf-fiber', parsed.fiber)) filled++;
+    if(parsed.colorway && fillIfEmpty('yf-colorway', parsed.colorway)) filled++;
+    if(parsed.skeinYardage && fillIfEmpty('yf-skeinyardage', parsed.skeinYardage)) filled++;
+    if(parsed.skeinWeightGrams && fillIfEmpty('yf-skeinweight', parsed.skeinWeightGrams)) filled++;
+    if(parsed.weightCategory){ const el=document.getElementById('yf-weightcat'); if(el){ el.value=parsed.weightCategory; filled++; } }
+    setStatus('');
+    wgToast(filled ? `Prefilled ${filled} field${filled===1?'':'s'} — please double-check before saving.` : 'Read the label, but those fields were already filled.', filled?'success':undefined);
+  }catch(err){
+    console.error('OCR failed', err);
+    setStatus('');
+    wgToast("Couldn't read that label. You can still enter details manually.", "error");
+  }
 }
 async function processSinglePhotoFile(file){
   document.getElementById('yf-extracting').style.display = 'inline';
@@ -2061,7 +2202,7 @@ function buildYarnPickerHTML(){
   const chips = unlinked.length
     ? `<div class="yarn-picker">${unlinked.map(y=>`
         <button type="button" class="yarn-chip" onclick="toggleProjectYarn('${y.id}')">
-          <span class="dot" style="background:${y.colorHex}"></span>${esc(y.name)}
+          <span class="dot" style="background:${(y.isMulticolor && y.colors && y.colors.length>=2) ? buildConicGradient(y.colors) : y.colorHex}"></span>${esc(yarnDisplayName(y))}
         </button>`).join('')}</div>`
     : `<p class="note">Every stash yarn is already linked to this project.</p>`;
 
@@ -2076,8 +2217,8 @@ function buildYarnPickerHTML(){
     const shortfall = reqNum > remaining ? reqNum - remaining : 0;
     return `<div style="padding:9px 2px; border-bottom:1px dashed var(--border);">
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-        <span class="dot" style="background:${y.colorHex}; flex-shrink:0;"></span>
-        <span style="font-size:0.82rem; flex:1; min-width:110px;">${esc(y.name)}</span>
+        <span class="dot" style="background:${(y.isMulticolor && y.colors && y.colors.length>=2) ? buildConicGradient(y.colors) : y.colorHex}; flex-shrink:0;"></span>
+        <span style="font-size:0.82rem; flex:1; min-width:110px;">${esc(yarnDisplayName(y))}</span>
         <button type="button" class="btn btn-ghost btn-small" onclick="toggleYarnStatus('${y.id}','${STATE.editingProjectId}')" title="Not fully used? Set it aside so it's excluded from your 'unused stash' count.">${allocated?'Un-allocate':'Allocate'}</button>
         <button type="button" class="btn btn-ghost btn-small" onclick="removeYarnFromStashInline('${y.id}')" title="Skein is gone — remove it from the stash entirely">${ICONS.trash}</button>
         <button type="button" class="btn btn-ghost btn-small" onclick="toggleProjectYarn('${y.id}')" title="Unlink from this project (gives back any yardage recorded here)">✕</button>
@@ -2112,6 +2253,35 @@ function toggleProjectYarn(id){
   } else {
     pendingProjectYarnIds = [...pendingProjectYarnIds, id];
   }
+  refreshYarnPicker();
+}
+/* Selecting a saved palette on a project: link each of the palette's yarns
+   that's still in stock to the project, and report which are gone (deleted)
+   or out of yardage — so the user immediately sees what they can and can't
+   make from that palette. */
+function applyPaletteToProject(paletteId){
+  const statusEl = document.getElementById('pf-palette-status');
+  if(!paletteId){ if(statusEl) statusEl.innerHTML=''; return; }
+  const pal = STATE.paletteSavedPalettes.find(p=>p.id===paletteId);
+  if(!pal){ if(statusEl) statusEl.innerHTML=''; return; }
+  const yarnIds = [];
+  if(pal.baseYarnId) yarnIds.push(pal.baseYarnId);
+  (pal.slots||[]).forEach(s=>{ if(s.yarnId) yarnIds.push(s.yarnId); });
+
+  const linked=[], gone=[], empty=[];
+  [...new Set(yarnIds)].forEach(id=>{
+    const y = STATE.yarns.find(yy=>yy.id===id);
+    if(!y){ gone.push(id); return; }
+    if((Number(y.yardageRemaining)||0) <= 0){ empty.push(y); }
+    if(!pendingProjectYarnIds.includes(id)) pendingProjectYarnIds.push(id);
+    linked.push(y);
+  });
+
+  const parts = [];
+  if(linked.length) parts.push(`<span style="color:var(--forest);">Linked ${linked.length} yarn${linked.length===1?'':'s'} from this palette.</span>`);
+  if(empty.length) parts.push(`<span style="color:var(--wine);">Out of stock: ${empty.map(y=>esc(yarnDisplayName(y))).join(', ')}.</span>`);
+  if(gone.length) parts.push(`<span style="color:var(--wine);">${gone.length} palette yarn${gone.length===1?'':'s'} no longer in your stash.</span>`);
+  if(statusEl) statusEl.innerHTML = `<p class="note" style="margin:0; line-height:1.5;">${parts.join(' ')}</p>`;
   refreshYarnPicker();
 }
 /* The actual stash-quantity-tracking feature: editing "yards used" for a
@@ -2199,10 +2369,11 @@ function renderProjectForm(){
 
     ${STATE.paletteSavedPalettes.length ? `
     <label class="field span2">Palette (optional)
-      <select id="pf-palette">
+      <select id="pf-palette" onchange="applyPaletteToProject(this.value)">
         <option value="">— none —</option>
         ${STATE.paletteSavedPalettes.map(p=>`<option value="${p.id}" ${editing && editing.paletteId===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}
       </select>
+      <div id="pf-palette-status" style="margin-top:6px;"></div>
     </label>` : ''}
 
     <div class="span2">
@@ -2440,9 +2611,27 @@ function weightCompatible(baseWeight, candidateWeight){
   return Math.abs(bi-ci) <= 1;
 }
 function isNeutralYarn(y){
-  // Near-neutral = very low saturation (creams, greys, charcoal, white, black).
-  const hsl = hexToHsl(y.colorHex);
-  return hsl.s < 12;
+  // Neutrals in fiber-arts terms: not just greys/black/white, but the warm
+  // "workhorse" neutrals too — brown, tan, beige, camel, cream. A yarn is
+  // neutral if it's genuinely low-saturation (greys/black/white), or a muted
+  // warm/earthy tone (the brown→cream family), which all read as neutral
+  // grounds in real projects. Vivid warm colors (rust, mustard, orange) stay
+  // out via the saturation ceiling scaled by how vivid they'd read.
+  const { h, s, l } = hexToHsl(y.colorHex);
+  // True achromatic neutrals: greys/black have almost no saturation. Kept
+  // strict (< 10) so muted-but-real colors like pistachio or moss green —
+  // which still carry a clear hue at s≈16–18 — are NOT mistaken for grey.
+  if(s < 10) return true;
+  if(l > 95) return true;                         // near-whites / naturals
+  // Warm/earthy band (reds→yellows, ~10–55°). These are neutral when muted;
+  // the ceiling is looser for very dark (brown) and very pale (cream) tones,
+  // tighter in the mid-range so vivid rusts/mustards are excluded.
+  const warmHue = h >= 10 && h <= 55;
+  if(warmHue){
+    if((l < 45 || l > 78) && s < 60) return true;  // dark browns / pale creams — generous
+    if(s < 42) return true;                        // tan / camel / beige mid-range — muted only
+  }
+  return false;
 }
 /* Returns, for each harmony role, a *ranked* list of candidate matches
    (best first) rather than only the winner — this is what lets the user
@@ -2539,7 +2728,7 @@ function renderPalette(){
       return `<div class="palette-pick">
         <span class="palette-swatch" style="background:var(--bg); border:1px dashed var(--border);"></span>
         <p class="note" style="margin:0;">${esc(r.role)}</p>
-        <p class="note" style="margin:0;">no match</p>
+        <p class="note" style="margin:0;">${r.neutralSlot ? 'no true neutral in your stash' : 'no match in your stash'}</p>
       </div>`;
     }
     const via = r.yarn.isMulticolor && r.pick.matchedHex && r.pick.matchedHex!==r.yarn.colorHex;
@@ -2555,7 +2744,7 @@ function renderPalette(){
     </div>`;
   }).join('');
 
-  const stretched = resolved.some(r=>r.pick && r.pick.closeness<55);
+  const stretched = resolved.some(r=>r.pick && r.pick.closeness<70);
   const unfilled = resolved.some(r=>!r.yarn);
 
   // Dream matches: the ideal target color for each slot, named, shown as a
@@ -2564,13 +2753,20 @@ function renderPalette(){
   const baseHslForDream = hexToHsl(base.colorHex);
   const dreamMatches = suggestPalette(colored, base, STATE.paletteHarmony, STATE.paletteIncludeNeutral).map((slot,i)=>{
     const resolvedSlot = resolved[i];
-    const name = nameColor(slot.targetHex);
-    const closeEnough = resolvedSlot.yarn && resolvedSlot.pick && resolvedSlot.pick.closeness>=70;
+    // For a neutral slot, the "ideal" isn't a hue-rotated color — it's an
+    // actual neutral. Present a soft greige/cream target so the name and the
+    // shop suggestion are honestly neutral, not a stray color.
+    const targetHex = slot.neutralSlot ? '#cfc7b8' : slot.targetHex;
+    const name = slot.neutralSlot ? 'a neutral (cream / grey / tan)' : nameColor(targetHex);
+    // A multicolor yarn can't satisfy a dream slot — we can't point to which
+    // of its strands is "the" color, so it shouldn't count as owning it.
+    const singleColorMatch = resolvedSlot.yarn && !resolvedSlot.yarn.isMulticolor;
+    // 85% closeness ≈ ΔE 9 — genuinely the same colour, not just "nearest".
+    // (70% was ΔE 18, loose enough that e.g. a navy could pass as a purple.)
+    const closeEnough = singleColorMatch && resolvedSlot.pick && resolvedSlot.pick.closeness>=85;
     const owned = closeEnough && yarnStatus(resolvedSlot.yarn)!=='allocated';
-    // A close match exists but it's allocated to another project — worth
-    // flagging distinctly so "shop it" doesn't imply you own nothing suitable.
     const allocatedOnly = closeEnough && yarnStatus(resolvedSlot.yarn)==='allocated';
-    return { role:slot.role, hex:slot.targetHex, name, owned, allocatedOnly };
+    return { role:slot.role, hex:targetHex, name, owned, allocatedOnly, neutralSlot:slot.neutralSlot };
   });
   const dreamCard = `<div class="card palette-picks">${dreamMatches.map((d,i)=>`
     <div class="palette-pick">
@@ -2634,6 +2830,12 @@ function togglePaletteNeutral(){ STATE.paletteIncludeNeutral=!STATE.paletteInclu
 function resetPaletteChoices(){ STATE.paletteSlotChoice={}; renderTab(); }
 /* Send a dream-match (ideal target color for a slot) to the shopping list,
    named and weight-tagged, recording the source palette for future dedup. */
+/* The shoppable target for a dream-match slot: an actual neutral swatch/name
+   for the neutral slot, otherwise the hue-rotated harmony target. */
+function dreamTargetFor(slot){
+  if(slot.neutralSlot) return { hex:'#cfc7b8', name:'neutral (cream / grey / tan)' };
+  return { hex:slot.targetHex, name:nameColor(slot.targetHex) };
+}
 function shopDreamMatch(baseId, harmony, slotIndex){
   if(!STATE.online){ wgToast("You're offline — adding to the shopping list needs a connection.", "error"); return; }
   const colored = STATE.yarns.filter(eligibleForPalette);
@@ -2642,15 +2844,16 @@ function shopDreamMatch(baseId, harmony, slotIndex){
   const slots = suggestPalette(colored, base, harmony, STATE.paletteIncludeNeutral);
   const slot = slots[slotIndex];
   if(!slot) return;
+  const t = dreamTargetFor(slot);
   addShoppingItem({
-    colorName: nameColor(slot.targetHex),
-    hex: slot.targetHex,
+    colorName: t.name,
+    hex: t.hex,
     weight: base.weightCategory || null,
     quantity: 1,
     note: harmony+' palette',
     sourceType:'palette', sourceId: base.id, sourceName: `${yarnDisplayName(base).split(' - ')[0]} ${harmony} palette`
   });
-  wgToast(`Added ${nameColor(slot.targetHex)} to your shopping list.`, "success");
+  wgToast(`Added ${t.name} to your shopping list.`, "success");
   renderTab();
 }
 /* Bulk version: add every dream-match color the user doesn't already own a
@@ -2665,11 +2868,12 @@ function shopAllDreamMatches(baseId, harmony){
   let added=0;
   slots.forEach((slot,i)=>{
     const rs = resolved[i];
-    const owned = rs.yarn && rs.pick && rs.pick.closeness>=70 && yarnStatus(rs.yarn)!=='allocated';
+    const owned = rs.yarn && !rs.yarn.isMulticolor && rs.pick && rs.pick.closeness>=85 && yarnStatus(rs.yarn)!=='allocated';
     if(owned) return;
+    const t = dreamTargetFor(slot);
     addShoppingItem({
-      colorName: nameColor(slot.targetHex),
-      hex: slot.targetHex,
+      colorName: t.name,
+      hex: t.hex,
       weight: base.weightCategory || null,
       quantity: 1,
       note: harmony+' palette',
