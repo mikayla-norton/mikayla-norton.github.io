@@ -24,7 +24,9 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
-    getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged
+    getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged,
+    createUserWithEmailAndPassword, signInWithEmailAndPassword,
+    sendPasswordResetEmail, sendEmailVerification
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
   import {
     getFirestore, doc, getDoc, setDoc, updateDoc, arrayUnion,
@@ -69,6 +71,36 @@
       });
     },
     signOutUser(){ return signOut(auth); },
+    // Email/password auth. These throw on error (bad password, email in use,
+    // etc.); the app catches and shows friendly messages. New sign-ups get a
+    // verification email sent immediately.
+    async signInEmail(email, password){
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+      return cred.user;
+    },
+    async signUpEmail(email, password){
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
+      try{ await sendEmailVerification(cred.user); }catch(e){ console.warn('verification send failed', e); }
+      return cred.user;
+    },
+    async resendVerification(){
+      if(auth.currentUser) await sendEmailVerification(auth.currentUser);
+    },
+    async resetPassword(email){
+      await sendPasswordResetEmail(auth, email);
+    },
+    async reloadUser(){
+      if(auth.currentUser){ await auth.currentUser.reload(); return auth.currentUser; }
+      return null;
+    },
+    isEmailVerified(){
+      const u = auth.currentUser;
+      if(!u) return false;
+      // Google (and other federated) accounts are inherently verified; only
+      // email/password sign-ups need the verification gate.
+      const isPasswordUser = u.providerData.some(p=>p.providerId==='password');
+      return !isPasswordUser || u.emailVerified;
+    },
     async getIdToken(){ return auth.currentUser ? await auth.currentUser.getIdToken() : null; },
     onAuthChange(cb){ return onAuthStateChanged(auth, cb); },
 
@@ -298,6 +330,8 @@
   .wg-toast.show{ opacity:1; transform:translateY(0); }
   .wg-toast.success{ background:var(--forest); }
   .wg-toast.error{ background:var(--wine); }
+  .stash-controls{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  .stash-controls input, .stash-controls select{ font-size:0.82rem; }
 
   /* ============================================================
      MOBILE — bottom nav, FAB, sheets, full-screen forms.
@@ -512,6 +546,14 @@ let STATE = {
   inStoreColor: null,             // hex captured from an in-store skein photo
   inStoreExtracted: [],           // candidate colors from the photo
   showShoppingForm: false,
+  editingShoppingId: null,
+  authMode: 'signin',
+  stashSearch: '',
+  stashFilterWeight: 'All weights',
+  stashFilterFiber: 'All fibers',
+  stashSort: 'recent',
+  projFilterStatus: 'All statuses',
+  projSort: 'recent',
 };
 let pendingColorHex = '#5C3A72';
 let extractedSwatches = [];
@@ -1003,6 +1045,17 @@ function render(){
     return;
   }
 
+  // Signed in but email not verified (password accounts only) — gate the app.
+  if(window.FB.isEmailVerified && !window.FB.isEmailVerified()){
+    app.innerHTML = `<div class="wrap">
+      <header class="app-header">
+        <div><h1>Woolgather</h1><p>A quiet ledger for yarn, thread, and the projects they become.</p></div>
+      </header>
+      ${renderVerifyGate()}
+    </div>`;
+    return;
+  }
+
   const tabs = tabRegistry();
   const desktopTabs = tabs.map(t =>
     `<button class="${STATE.tab===t.id?'active':''}" onclick="switchTab('${t.id}')">${t.icon} ${t.label}</button>`
@@ -1097,11 +1150,107 @@ function renderSettingsSheet(){
 function closeSettings(){ STATE.settingsOpen = false; const s=document.getElementById('settings-sheet'); if(s) s.remove(); }
 
 function renderSignedOut(){
-  return `<div class="empty" style="margin-top:24px;">
-    <p class="title">Sign in to start your stash</p>
-    <p class="body">Your yarn, projects, and palettes are saved to your account and follow you to any browser or device you sign into — including friends you invite to use this.</p>
-    <button class="btn btn-primary" onclick="window.FB.signIn()">${ICONS.sparkles} Sign in with Google</button>
+  const mode = STATE.authMode || 'signin'; // 'signin' | 'signup'
+  return `<div style="max-width:380px; margin:24px auto 0;">
+    <div class="card">
+      <h2 style="font-family:'Fraunces',serif; font-size:1.2rem; margin:0 0 4px;">${mode==='signup'?'Create your account':'Sign in to Woolgather'}</h2>
+      <p class="note" style="margin:0 0 16px;">Your yarn, projects, and palettes sync to your account across every device you sign into.</p>
+      <form onsubmit="handleEmailAuth(event)">
+        <label class="field" style="margin-bottom:10px;">Email
+          <input id="auth-email" type="email" required autocomplete="email" placeholder="you@example.com" />
+        </label>
+        <label class="field" style="margin-bottom:6px;">Password
+          <input id="auth-password" type="password" required autocomplete="${mode==='signup'?'new-password':'current-password'}" placeholder="${mode==='signup'?'At least 6 characters':'Your password'}" />
+        </label>
+        ${mode==='signin' ? `<p style="margin:0 0 14px;"><button type="button" onclick="handleForgotPassword()" style="background:none;border:none;padding:0;color:var(--plum);font-size:0.78rem;cursor:pointer;text-decoration:underline;">Forgot password?</button></p>` : '<div style="height:8px;"></div>'}
+        <button type="submit" class="btn btn-primary" style="width:100%;">${mode==='signup'?'Create account':'Sign in'}</button>
+      </form>
+      <p class="note" style="text-align:center; margin:14px 0;">
+        ${mode==='signup'
+          ? `Already have an account? <button onclick="STATE.authMode='signin'; render();" style="background:none;border:none;padding:0;color:var(--plum);font-size:0.8rem;cursor:pointer;text-decoration:underline;">Sign in</button>`
+          : `New here? <button onclick="STATE.authMode='signup'; render();" style="background:none;border:none;padding:0;color:var(--plum);font-size:0.8rem;cursor:pointer;text-decoration:underline;">Create an account</button>`}
+      </p>
+      <div style="display:flex; align-items:center; gap:10px; margin:6px 0 14px; color:var(--ink-soft); font-size:0.75rem;">
+        <span style="flex:1; height:1px; background:var(--border);"></span>or<span style="flex:1; height:1px; background:var(--border);"></span>
+      </div>
+      <button class="btn btn-ghost" style="width:100%;" onclick="window.FB.signIn()">${ICONS.sparkles} Continue with Google</button>
+    </div>
   </div>`;
+}
+async function handleEmailAuth(e){
+  e.preventDefault();
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const mode = STATE.authMode || 'signin';
+  if(!email || !password) return;
+  try{
+    if(mode==='signup'){
+      await window.FB.signUpEmail(email, password);
+      wgToast('Account created — check your email to verify.', 'success');
+    } else {
+      await window.FB.signInEmail(email, password);
+    }
+    // onAuthChange handles the rest (render + verification gate).
+  }catch(err){
+    wgToast(friendlyAuthError(err), 'error');
+  }
+}
+async function handleForgotPassword(){
+  const email = await wgPrompt('Enter your account email and we\'ll send a reset link.', {title:'Reset password', defaultValue: (document.getElementById('auth-email')||{}).value||'', placeholder:'you@example.com', okLabel:'Send link'});
+  if(email===null) return;
+  if(!email.trim()){ wgToast('Please enter your email.', 'error'); return; }
+  try{
+    await window.FB.resetPassword(email.trim());
+    wgToast('Password reset email sent — check your inbox.', 'success');
+  }catch(err){
+    wgToast(friendlyAuthError(err), 'error');
+  }
+}
+/* Map Firebase auth error codes to human messages. */
+function friendlyAuthError(err){
+  const code = (err && err.code) || '';
+  const map = {
+    'auth/invalid-email':'That doesn\'t look like a valid email address.',
+    'auth/user-not-found':'No account found with that email — try creating one.',
+    'auth/wrong-password':'Incorrect password. Try again or reset it.',
+    'auth/invalid-credential':'Email or password is incorrect.',
+    'auth/email-already-in-use':'That email is already registered — try signing in instead.',
+    'auth/weak-password':'Password should be at least 6 characters.',
+    'auth/too-many-requests':'Too many attempts — please wait a moment and try again.',
+    'auth/network-request-failed':'Network problem — check your connection.',
+    'auth/popup-closed-by-user':'Sign-in was cancelled.'
+  };
+  return map[code] || (err && err.message) || 'Something went wrong. Please try again.';
+}
+/* Verification gate — shown when a password user hasn't verified their email
+   yet. They can resend, or re-check after clicking the link in their inbox. */
+function renderVerifyGate(){
+  return `<div style="max-width:380px; margin:24px auto 0;">
+    <div class="card">
+      <h2 style="font-family:'Fraunces',serif; font-size:1.2rem; margin:0 0 4px;">Verify your email</h2>
+      <p class="note" style="margin:0 0 14px;">We sent a verification link to <strong style="color:var(--ink);">${esc(STATE.user.email||'your email')}</strong>. Click it, then tap "I've verified" below.</p>
+      <button class="btn btn-primary" style="width:100%; margin-bottom:8px;" onclick="handleCheckVerified()">I've verified — continue</button>
+      <button class="btn btn-ghost" style="width:100%; margin-bottom:8px;" onclick="handleResendVerification()">Resend verification email</button>
+      <button class="btn btn-ghost" style="width:100%;" onclick="window.FB.signOutUser()">Sign out</button>
+    </div>
+  </div>`;
+}
+async function handleCheckVerified(){
+  try{
+    await window.FB.reloadUser();
+    if(window.FB.isEmailVerified()){
+      wgToast('Email verified — welcome!', 'success');
+      render();
+    } else {
+      wgToast("Not verified yet — click the link in your email first.", 'error');
+    }
+  }catch(err){ wgToast(friendlyAuthError(err), 'error'); }
+}
+async function handleResendVerification(){
+  try{
+    await window.FB.resendVerification();
+    wgToast('Verification email resent.', 'success');
+  }catch(err){ wgToast(friendlyAuthError(err), 'error'); }
 }
 
 function renderTab(){
@@ -1170,8 +1319,8 @@ function computeStats(){
 function renderOverview(){
   if(STATE.yarns.length===0 && STATE.projects.length===0){
     return `<div class="empty">
-      <p class="title">Nothing logged yet</p>
-      <p class="body">Add a few skeins to your stash to start seeing where your yardage, fibers, and colors actually go.</p>
+      <p class="title">Welcome to Woolgather 🧶</p>
+      <p class="body">Your quiet ledger for yarn, projects, and palettes. Start by logging a skein or two — then the dashboard, palette matching, and shopping tools all come to life. Everything saves to your account and syncs across your devices.</p>
       <button class="btn btn-primary" onclick="switchTab('stash')">${ICONS.plus} Add your first yarn</button>
     </div>`;
   }
@@ -1245,10 +1394,66 @@ function renderStash(){
   if(STATE.showYarnForm) html += renderYarnForm();
   if(STATE.yarns.length===0){
     html += `<div class="empty"><p class="title">Your stash is empty</p><p class="body">Log a skein — its color, fiber, and yardage — and it'll start showing up across the app.</p></div>`;
+    return html;
+  }
+
+  // Search / filter / sort controls — only worth showing once the stash is
+  // big enough to need them.
+  if(STATE.yarns.length >= 6){
+    const weightOpts = ['All weights', ...WEIGHTS];
+    const fiberCats = ['All fibers', ...[...new Set(STATE.yarns.map(y=>categorizeFiber(y.fiber)))].sort()];
+    html += `<div class="stash-controls">
+      <input type="text" placeholder="Search brand, line, colorway…" value="${esc(STATE.stashSearch||'')}" oninput="setStashSearch(this.value)" style="flex:1; min-width:140px;" />
+      <select onchange="STATE.stashFilterWeight=this.value; renderTab();">
+        ${weightOpts.map(w=>`<option ${(STATE.stashFilterWeight||'All weights')===w?'selected':''}>${w}</option>`).join('')}
+      </select>
+      <select onchange="STATE.stashFilterFiber=this.value; renderTab();">
+        ${fiberCats.map(f=>`<option ${(STATE.stashFilterFiber||'All fibers')===f?'selected':''}>${f}</option>`).join('')}
+      </select>
+      <select onchange="STATE.stashSort=this.value; renderTab();">
+        ${[['recent','Newest'],['name','Name A–Z'],['yardage','Most yardage'],['color','Color']].map(([v,l])=>`<option value="${v}" ${(STATE.stashSort||'recent')===v?'selected':''}>${l}</option>`).join('')}
+      </select>
+    </div>`;
+  }
+
+  const shown = filteredSortedYarns();
+  if(shown.length===0){
+    html += `<div class="empty"><p class="title">No matches</p><p class="body">No yarn matches your search or filters. Try clearing them.</p></div>`;
   } else {
-    html += `<div class="yarn-grid">${STATE.yarns.map(renderYarnCard).join('')}</div>`;
+    if(shown.length !== STATE.yarns.length){
+      html += `<p class="note" style="margin-bottom:10px;">Showing ${shown.length} of ${STATE.yarns.length}</p>`;
+    }
+    html += `<div class="yarn-grid">${shown.map(renderYarnCard).join('')}</div>`;
   }
   return html;
+}
+function setStashSearch(v){
+  STATE.stashSearch = v;
+  // Re-render only the grid area would be ideal, but full tab re-render keeps
+  // the input focused poorly; instead update the grid in place.
+  const shown = filteredSortedYarns();
+  const grid = document.querySelector('#inner-tab-content .yarn-grid');
+  const note = document.querySelector('#inner-tab-content .stash-count-note');
+  if(grid){
+    grid.innerHTML = shown.map(renderYarnCard).join('');
+  }
+}
+function filteredSortedYarns(){
+  let list = [...STATE.yarns];
+  const q = (STATE.stashSearch||'').toLowerCase().trim();
+  if(q){
+    list = list.filter(y => [y.brand,y.line,y.name,y.colorway,y.fiber].filter(Boolean).some(f=>f.toLowerCase().includes(q)));
+  }
+  const fw = STATE.stashFilterWeight;
+  if(fw && fw!=='All weights') list = list.filter(y=>y.weightCategory===fw);
+  const ff = STATE.stashFilterFiber;
+  if(ff && ff!=='All fibers') list = list.filter(y=>categorizeFiber(y.fiber)===ff);
+  const sort = STATE.stashSort || 'recent';
+  if(sort==='name') list.sort((a,b)=>yarnDisplayName(a).localeCompare(yarnDisplayName(b)));
+  else if(sort==='yardage') list.sort((a,b)=>yarnTotalYardage(b)-yarnTotalYardage(a));
+  else if(sort==='color') list.sort((a,b)=>hexToHsl(a.colorHex||'#000').h - hexToHsl(b.colorHex||'#000').h);
+  else list.reverse(); // recent = newest first (added order reversed)
+  return list;
 }
 
 function showYarnForm(id){
@@ -1653,6 +1858,15 @@ function renderYarnCard(y){
   const multi = y.isMulticolor && y.colors && y.colors.length>=2;
   const swatchBg = multi ? buildConicGradient(y.colors) : y.colorHex;
   const swatchTitle = multi && y.colors.length>=4 ? ' title="4+ colors — reference only, not used in Palette Lab matching"' : '';
+  // Reverse lookup: which projects/palettes reference this yarn.
+  const usedInProjects = STATE.projects.filter(p=>(p.yarnIds||[]).includes(y.id));
+  const usedInPalettes = STATE.paletteSavedPalettes.filter(pl=>(pl.slots||[]).some(s=>s.yarnId===y.id) || pl.baseYarnId===y.id);
+  const usageBits = [];
+  if(usedInProjects.length) usageBits.push(`${usedInProjects.length} project${usedInProjects.length===1?'':'s'}`);
+  if(usedInPalettes.length) usageBits.push(`${usedInPalettes.length} palette${usedInPalettes.length===1?'':'s'}`);
+  const usageLine = usageBits.length
+    ? `<p class="note" style="margin-top:8px; font-size:0.7rem;" title="${esc([...usedInProjects.map(p=>p.name),...usedInPalettes.map(p=>p.name)].join(', '))}">Used in ${usageBits.join(' · ')}</p>`
+    : '';
   return `<div class="card yarn-card">
     <div class="yarn-hole"></div>
     <div class="yarn-top">
@@ -1684,6 +1898,7 @@ function renderYarnCard(y){
         ${allocated ? 'Allocated' + (allocatedProject ? ' · '+esc(allocatedProject.name) : '') : 'Mark allocated'}
       </button>
     </div>
+    ${usageLine}
   </div>`;
 }
 
@@ -1699,8 +1914,31 @@ function renderProjects(){
   if(STATE.showProjectForm) html += renderProjectForm();
   if(STATE.projects.length===0){
     html += `<div class="empty"><p class="title">No projects yet</p><p class="body">Log a project — planned, in progress, or finished — and link the yarn (and videos or blog posts) you're using.</p></div>`;
+    return html;
+  }
+  // Status filter + sort once there are enough projects to warrant it.
+  if(STATE.projects.length >= 6){
+    html += `<div class="stash-controls">
+      <select onchange="STATE.projFilterStatus=this.value; renderTab();">
+        ${['All statuses',...STATUSES].map(s=>`<option ${(STATE.projFilterStatus||'All statuses')===s?'selected':''}>${s}</option>`).join('')}
+      </select>
+      <select onchange="STATE.projSort=this.value; renderTab();">
+        ${[['recent','Newest'],['name','Name A–Z'],['status','By status']].map(([v,l])=>`<option value="${v}" ${(STATE.projSort||'recent')===v?'selected':''}>${l}</option>`).join('')}
+      </select>
+    </div>`;
+  }
+  let list = [...STATE.projects];
+  const fs = STATE.projFilterStatus;
+  if(fs && fs!=='All statuses') list = list.filter(p=>p.status===fs);
+  const sort = STATE.projSort || 'recent';
+  if(sort==='name') list.sort((a,b)=>a.name.localeCompare(b.name));
+  else if(sort==='status'){ const order={WIP:0,Planned:1,Finished:2,Frogged:3}; list.sort((a,b)=>(order[a.status]??9)-(order[b.status]??9)); }
+  else list.reverse();
+
+  if(list.length===0){
+    html += `<div class="empty"><p class="title">No matches</p><p class="body">No projects match this filter.</p></div>`;
   } else {
-    html += `<div class="card">${STATE.projects.map(renderProjectRow).join('')}</div>`;
+    html += `<div class="card">${list.map(renderProjectRow).join('')}</div>`;
   }
   return html;
 }
@@ -2614,49 +2852,60 @@ async function clearDoneShopping(){
 function addManualShoppingItem(){
   if(!STATE.online){ wgToast("You're offline — adding to the shopping list needs a connection.", "error"); return; }
   STATE.showShoppingForm = true;
+  STATE.editingShoppingId = null;
   renderTab();
 }
-function hideShoppingForm(){ STATE.showShoppingForm = false; renderTab(); }
+function editShoppingItem(id){
+  if(!STATE.online){ wgToast("You're offline — editing needs a connection.", "error"); return; }
+  STATE.showShoppingForm = true;
+  STATE.editingShoppingId = id;
+  renderTab();
+}
+function hideShoppingForm(){ STATE.showShoppingForm = false; STATE.editingShoppingId = null; renderTab(); }
 function submitShoppingForm(e){
   if(e) e.preventDefault();
-  const colorName = document.getElementById('sf-color').value.trim();
-  const weight = document.getElementById('sf-weight').value;
-  const fiber = document.getElementById('sf-fiber').value.trim();
-  const yardage = document.getElementById('sf-yardage').value;
-  const qty = document.getElementById('sf-qty').value;
-  addShoppingItem({
-    colorName: colorName||null,
-    weight: weight||null,
-    fiber: fiber||null,
-    yardage: yardage===''?null:Number(yardage),
-    quantity: Number(qty)||1,
-    sourceType:'manual'
-  });
+  const fields = {
+    colorName: document.getElementById('sf-color').value.trim()||null,
+    weight: document.getElementById('sf-weight').value||null,
+    fiber: document.getElementById('sf-fiber').value.trim()||null,
+    yardage: document.getElementById('sf-yardage').value===''?null:Number(document.getElementById('sf-yardage').value),
+    quantity: Number(document.getElementById('sf-qty').value)||1
+  };
+  if(STATE.editingShoppingId){
+    STATE.shoppingList = STATE.shoppingList.map(i=> i.id===STATE.editingShoppingId ? {...i, ...fields} : i);
+    persist();
+    wgToast('Item updated.', 'success');
+  } else {
+    addShoppingItem({ ...fields, sourceType:'manual' });
+    wgToast('Added to shopping list.', 'success');
+  }
   STATE.showShoppingForm = false;
-  wgToast('Added to shopping list.', 'success');
+  STATE.editingShoppingId = null;
   renderTab();
 }
 function renderShoppingForm(){
+  const editing = STATE.editingShoppingId ? STATE.shoppingList.find(i=>i.id===STATE.editingShoppingId) : null;
+  const v = (f,d='') => editing ? (editing[f] ?? d) : d;
   return `<form class="card form-grid" onsubmit="submitShoppingForm(event)" style="margin-bottom:16px;">
     <label class="field">Color (optional)
-      <input id="sf-color" placeholder="e.g. sage green" />
+      <input id="sf-color" placeholder="e.g. sage green" value="${esc(v('colorName'))}" />
     </label>
     <label class="field">Weight (optional)
-      <select id="sf-weight"><option value="">—</option>${WEIGHTS.map(w=>`<option>${w}</option>`).join('')}</select>
+      <select id="sf-weight"><option value="">—</option>${WEIGHTS.map(w=>`<option ${editing&&editing.weight===w?'selected':''}>${w}</option>`).join('')}</select>
     </label>
     <label class="field">Fiber (optional)
-      <input id="sf-fiber" placeholder="e.g. wool" />
+      <input id="sf-fiber" placeholder="e.g. wool" value="${esc(v('fiber'))}" />
     </label>
     <label class="field">Yardage needed (optional)
-      <input id="sf-yardage" type="number" min="0" placeholder="e.g. 220" />
+      <input id="sf-yardage" type="number" min="0" placeholder="e.g. 220" value="${esc(v('yardage'))}" />
     </label>
     <label class="field">Quantity (skeins)
-      <input id="sf-qty" type="number" min="1" value="1" />
+      <input id="sf-qty" type="number" min="1" value="${editing?esc(editing.quantity):1}" />
     </label>
     <div></div>
     <div class="span2" style="display:flex; gap:8px; justify-content:flex-end;">
       <button type="button" class="btn btn-ghost" onclick="hideShoppingForm()">Cancel</button>
-      <button type="submit" class="btn btn-primary">Add item</button>
+      <button type="submit" class="btn btn-primary">${editing?'Save changes':'Add item'}</button>
     </div>
   </form>`;
 }
@@ -2680,8 +2929,24 @@ function renderShopping(){
     return html;
   }
 
-  html += `<div style="display:flex; flex-direction:column; gap:10px;">${items.map(renderShoppingItem).join('')}</div>`;
+  // Group visually by color+weight+fiber so a project gap and a palette gap
+  // for the same yarn collapse into one line (quantities summed, all sources
+  // shown). Underlying items stay separate for per-source remove/check.
+  const groups = groupShoppingItems(items);
+  html += `<div style="display:flex; flex-direction:column; gap:10px;">${groups.map(renderShoppingGroup).join('')}</div>`;
   return html;
+}
+function shoppingSignature(it){
+  return [ (it.colorName||'').toLowerCase().trim(), (it.weight||'').toLowerCase().trim(), (it.fiber||'').toLowerCase().trim() ].join('|');
+}
+function groupShoppingItems(items){
+  const map = new Map();
+  items.forEach(it=>{
+    const key = shoppingSignature(it) + '|' + (it.done?'done':'todo');
+    if(!map.has(key)) map.set(key, []);
+    map.get(key).push(it);
+  });
+  return [...map.values()];
 }
 
 /* In-store color check: snap/upload a photo of a skein you're looking at,
@@ -2797,23 +3062,42 @@ async function processInStorePhoto(file){
 function pickInStoreColor(hex){ STATE.inStoreColor=hex; renderTab(); }
 function clearInStoreColor(){ STATE.inStoreColor=null; STATE.inStoreExtracted=[]; renderTab(); }
 
-function renderShoppingItem(it){
-  const spec = [it.colorName, it.weight, it.fiber, it.yardage?('~'+it.yardage+' yd'):''].filter(Boolean).join(' · ') || 'Yarn';
-  const src = it.sourceType!=='manual' && it.sourceName
-    ? `<p class="note" style="margin:2px 0 0;">for: ${esc(it.sourceName)}</p>` : '';
-  return `<div class="card" style="display:flex; align-items:flex-start; gap:12px; ${it.done?'opacity:0.55;':''}">
-    <button onclick="toggleShoppingDone('${it.id}')" aria-label="Toggle done" style="background:none;border:1px solid var(--border);border-radius:5px;width:22px;height:22px;flex-shrink:0;cursor:pointer;color:var(--forest);font-size:0.9rem;line-height:1;margin-top:2px;">${it.done?'✓':''}</button>
-    ${it.hex ? `<span class="swatch" style="background:${it.hex}; margin-top:1px;"></span>` : ''}
+function renderShoppingGroup(group){
+  const rep = group[0]; // representative for spec + search links
+  const done = rep.done;
+  const totalQty = group.reduce((s,i)=>s+(Number(i.quantity)||1),0);
+  const spec = [rep.colorName, rep.weight, rep.fiber, rep.yardage?('~'+rep.yardage+' yd'):''].filter(Boolean).join(' · ') || 'Yarn';
+  const sources = group.filter(i=>i.sourceType!=='manual' && i.sourceName).map(i=>i.sourceName);
+  const uniqueSources = [...new Set(sources)];
+  const srcLine = uniqueSources.length ? `<p class="note" style="margin:2px 0 0;">for: ${uniqueSources.map(esc).join(', ')}</p>` : '';
+  const ids = group.map(i=>i.id);
+  return `<div class="card" style="display:flex; align-items:flex-start; gap:12px; ${done?'opacity:0.55;':''}">
+    <button onclick="toggleShoppingGroupDone('${ids.join(',')}')" aria-label="Toggle done" style="background:none;border:1px solid var(--border);border-radius:5px;width:22px;height:22px;flex-shrink:0;cursor:pointer;color:var(--forest);font-size:0.9rem;line-height:1;margin-top:2px;">${done?'✓':''}</button>
+    ${rep.hex ? `<span class="swatch" style="background:${rep.hex}; margin-top:1px;"></span>` : ''}
     <div style="flex:1; min-width:0;">
-      <p style="margin:0; font-weight:500; font-size:0.9rem; ${it.done?'text-decoration:line-through;':''}">${it.quantity>1?it.quantity+'× ':''}${esc(spec)}</p>
-      ${src}
+      <p style="margin:0; font-weight:500; font-size:0.9rem; ${done?'text-decoration:line-through;':''}">${totalQty>1?totalQty+'× ':''}${esc(spec)}</p>
+      ${srcLine}
       <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
-        <a class="btn btn-ghost btn-small" href="${esc(googleSearchUrl(it))}" target="_blank" rel="noopener">Search Google</a>
-        <a class="btn btn-ghost btn-small" href="${esc(ravelrySearchUrl(it))}" target="_blank" rel="noopener">Search Ravelry</a>
+        <a class="btn btn-ghost btn-small" href="${esc(googleSearchUrl(rep))}" target="_blank" rel="noopener">Search Google</a>
+        <a class="btn btn-ghost btn-small" href="${esc(ravelrySearchUrl(rep))}" target="_blank" rel="noopener">Search Ravelry</a>
+        ${group.length===1 ? `<button class="btn btn-ghost btn-small" onclick="editShoppingItem('${rep.id}')">Edit</button>` : ''}
       </div>
     </div>
-    <button class="del-btn" onclick="removeShoppingItem('${it.id}')" aria-label="Remove">${ICONS.trash}</button>
+    <button class="del-btn" onclick="removeShoppingGroup('${ids.join(',')}')" aria-label="Remove">${ICONS.trash}</button>
   </div>`;
+}
+function toggleShoppingGroupDone(idsStr){
+  const ids = idsStr.split(',');
+  const anyUndone = STATE.shoppingList.some(i=>ids.includes(i.id) && !i.done);
+  STATE.shoppingList = STATE.shoppingList.map(i=> ids.includes(i.id) ? {...i, done:anyUndone} : i);
+  persist();
+  renderTab();
+}
+function removeShoppingGroup(idsStr){
+  const ids = idsStr.split(',');
+  STATE.shoppingList = STATE.shoppingList.filter(i=>!ids.includes(i.id));
+  persist();
+  renderTab();
 }
 
 function renderPresetsAdmin(){
