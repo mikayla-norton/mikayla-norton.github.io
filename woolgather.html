@@ -65,7 +65,7 @@
     signIn(){
       return signInWithPopup(auth, provider).catch(err => {
         console.error(err);
-        alert("Sign-in failed: " + err.message);
+        wgToast("Sign-in failed: " + err.message, "error");
       });
     },
     signOutUser(){ return signOut(auth); },
@@ -283,6 +283,22 @@
   .offline-banner{ display:flex; align-items:center; gap:8px; background:#EFE7D8; border:1px solid var(--cardBorder,#C9BB99); color:var(--ink-soft); font-size:0.8rem; padding:8px 12px; border-radius:8px; margin-bottom:16px; }
   .offline-banner .icon{ width:16px; height:16px; flex-shrink:0; }
 
+  /* ---- In-app modal + toast (replaces all browser dialogs) ---- */
+  .wg-modal-backdrop{ position:fixed; inset:0; z-index:90; background:rgba(30,25,40,0.45); display:flex; align-items:center; justify-content:center; padding:20px; opacity:0; pointer-events:none; transition:opacity 0.16s; }
+  .wg-modal-backdrop.open{ opacity:1; pointer-events:auto; }
+  .wg-modal{ background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px; max-width:400px; width:100%; box-shadow:0 12px 40px rgba(0,0,0,0.25); transform:translateY(8px); transition:transform 0.16s; }
+  .wg-modal-backdrop.open .wg-modal{ transform:translateY(0); }
+  .wg-modal h3{ margin:0 0 8px; font-family:'Fraunces',serif; font-size:1.1rem; }
+  .wg-modal p{ margin:0 0 14px; font-size:0.9rem; color:var(--ink-soft); }
+  .wg-modal input{ width:100%; box-sizing:border-box; margin-bottom:14px; }
+  .wg-modal-actions{ display:flex; gap:8px; justify-content:flex-end; }
+  .wg-toast-wrap{ position:fixed; left:0; right:0; bottom:calc(84px + env(safe-area-inset-bottom,0)); z-index:95; display:flex; flex-direction:column; align-items:center; gap:8px; pointer-events:none; padding:0 16px; }
+  @media (min-width:761px){ .wg-toast-wrap{ bottom:24px; } }
+  .wg-toast{ background:var(--ink); color:#fff; border-radius:10px; padding:11px 16px; font-size:0.85rem; box-shadow:0 6px 20px rgba(0,0,0,0.25); max-width:420px; opacity:0; transform:translateY(10px); transition:opacity 0.2s, transform 0.2s; }
+  .wg-toast.show{ opacity:1; transform:translateY(0); }
+  .wg-toast.success{ background:var(--forest); }
+  .wg-toast.error{ background:var(--wine); }
+
   /* ============================================================
      MOBILE — bottom nav, FAB, sheets, full-screen forms.
      Everything above is the untouched desktop layout; these
@@ -400,6 +416,8 @@
 </head>
 <body>
 <div id="app"></div>
+<div id="wg-modal-root"></div>
+<div id="wg-toast-root" class="wg-toast-wrap"></div>
 
 <script>
 /* =================================================================
@@ -485,7 +503,15 @@ let STATE = {
   settingsOpen: false,
   online: (typeof navigator !== 'undefined' ? navigator.onLine : true),
   paletteBaseId: null,
-  paletteHarmony: 'Complementary'
+  paletteHarmony: 'Complementary',
+  paletteMatchMode: 'balanced',
+  paletteIncludeNeutral: false,
+  paletteSlotChoice: {},          // slot index -> chosen candidate index (cycling)
+  paletteSavedPalettes: [],       // loaded from Firestore alongside yarns/projects
+  shoppingList: [],               // saved shopping-list items (gaps to buy)
+  inStoreColor: null,             // hex captured from an in-store skein photo
+  inStoreExtracted: [],           // candidate colors from the photo
+  showShoppingForm: false,
 };
 let pendingColorHex = '#5C3A72';
 let extractedSwatches = [];
@@ -497,6 +523,7 @@ let multicolorExtractedSwatches = [];
 let colorDragSrcIndex = null;
 let pendingProjectYarnIds = [];
 let pendingProjectYarnUsage = [];
+let pendingProjectYarnRequired = [];
 let pendingProjectLinks = [];
 let pendingProjectPhotos = [];
 let fiberChartInstance = null;
@@ -512,10 +539,10 @@ let statusChartInstance = null;
 async function persist(){
   if(!STATE.user) return;
   try{
-    await window.FB.saveUserData(STATE.user.uid, { yarns: STATE.yarns, projects: STATE.projects });
+    await window.FB.saveUserData(STATE.user.uid, { yarns: STATE.yarns, projects: STATE.projects, palettes: STATE.paletteSavedPalettes, shoppingList: STATE.shoppingList });
   }catch(e){
     console.error('Save failed', e);
-    alert("Couldn't save to your account — check your connection and try again.");
+    wgToast("Couldn't save to your account — check your connection and try again.", "error");
   }
 }
 async function loadPresetsFromFirestore(){
@@ -539,6 +566,71 @@ function uid(){ return (typeof crypto !== 'undefined' && crypto.randomUUID) ? cr
 function todayStr(){ return new Date().toISOString().slice(0,10); }
 function daysBetween(a,b){ const d = Math.round((new Date(b) - new Date(a)) / 86400000); return Number.isFinite(d) ? d : null; }
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* =================================================================
+   In-app dialogs + toasts — replaces all browser prompt/confirm/alert
+   (which are ugly, un-brandable, and can be permanently suppressed by
+   the browser's "prevent additional dialogs" checkbox). All Promise-based
+   so call sites can `await` them like the native versions.
+================================================================= */
+function wgToast(message, kind){
+  const root = document.getElementById('wg-toast-root');
+  if(!root){ return; }
+  const t = document.createElement('div');
+  t.className = 'wg-toast' + (kind ? ' '+kind : '');
+  t.textContent = message;
+  root.appendChild(t);
+  requestAnimationFrame(()=> t.classList.add('show'));
+  setTimeout(()=>{
+    t.classList.remove('show');
+    setTimeout(()=> t.remove(), 250);
+  }, 3200);
+}
+function wgConfirm(message, { title='Are you sure?', okLabel='Confirm', danger=false } = {}){
+  return new Promise(resolve=>{
+    const root = document.getElementById('wg-modal-root');
+    root.innerHTML = `<div class="wg-modal-backdrop" id="wg-modal-bd">
+      <div class="wg-modal" role="dialog" aria-modal="true">
+        <h3>${esc(title)}</h3>
+        <p>${esc(message)}</p>
+        <div class="wg-modal-actions">
+          <button class="btn btn-ghost" id="wg-cancel">Cancel</button>
+          <button class="btn btn-primary" id="wg-ok" style="${danger?'background:var(--wine);':''}">${esc(okLabel)}</button>
+        </div>
+      </div>
+    </div>`;
+    const bd = document.getElementById('wg-modal-bd');
+    requestAnimationFrame(()=> bd.classList.add('open'));
+    const close = (val)=>{ bd.classList.remove('open'); setTimeout(()=>{ root.innerHTML=''; }, 160); resolve(val); };
+    document.getElementById('wg-ok').onclick = ()=> close(true);
+    document.getElementById('wg-cancel').onclick = ()=> close(false);
+    bd.onclick = (e)=>{ if(e.target===bd) close(false); };
+  });
+}
+function wgPrompt(message, { title='', defaultValue='', okLabel='Save', placeholder='' } = {}){
+  return new Promise(resolve=>{
+    const root = document.getElementById('wg-modal-root');
+    root.innerHTML = `<div class="wg-modal-backdrop" id="wg-modal-bd">
+      <div class="wg-modal" role="dialog" aria-modal="true">
+        ${title?`<h3>${esc(title)}</h3>`:''}
+        ${message?`<p>${esc(message)}</p>`:''}
+        <input id="wg-input" type="text" value="${esc(defaultValue)}" placeholder="${esc(placeholder)}" />
+        <div class="wg-modal-actions">
+          <button class="btn btn-ghost" id="wg-cancel">Cancel</button>
+          <button class="btn btn-primary" id="wg-ok">${esc(okLabel)}</button>
+        </div>
+      </div>
+    </div>`;
+    const bd = document.getElementById('wg-modal-bd');
+    const input = document.getElementById('wg-input');
+    requestAnimationFrame(()=>{ bd.classList.add('open'); input.focus(); input.select(); });
+    const close = (val)=>{ bd.classList.remove('open'); setTimeout(()=>{ root.innerHTML=''; }, 160); resolve(val); };
+    document.getElementById('wg-ok').onclick = ()=> close(input.value);
+    document.getElementById('wg-cancel').onclick = ()=> close(null);
+    input.onkeydown = (e)=>{ if(e.key==='Enter') close(input.value); if(e.key==='Escape') close(null); };
+    bd.onclick = (e)=>{ if(e.target===bd) close(null); };
+  });
+}
 function yarnTotalYardage(y){ return (Number(y.skeinYardage)||0) * (Number(y.quantity)||1); }
 function yarnStatus(y){ return y.status || 'available'; }
 /* "Brand - Line - Colorway" for Palette Lab, since that's where knowing
@@ -559,6 +651,24 @@ function projectYardageUsed(p){
     return p.yarnUsage.reduce((s,u)=>s+(Number(u.yardageUsed)||0),0);
   }
   return Number(p.yardageUsed)||0;
+}
+/* Per-yarn yardage gap for a project: for each linked yarn with a "need"
+   set, shortfall = need − that yarn's remaining stock. Summed across all
+   linked yarns. Returns null if no per-yarn requirements are set. */
+function projectYardageGap(p){
+  const reqs = p.yarnRequired || [];
+  if(!reqs.length) return null;
+  let required=0, shortfall=0;
+  reqs.forEach(r=>{
+    const need = Number(r.yardage)||0;
+    if(!need) return;
+    required += need;
+    const y = STATE.yarns.find(yy=>yy.id===r.yarnId);
+    const have = y ? (Number(y.yardageRemaining)||0) : 0;
+    if(need > have) shortfall += (need - have);
+  });
+  if(required===0) return null;
+  return { required, gap: Math.max(0, shortfall) };
 }
 
 /* Color math */
@@ -588,6 +698,138 @@ function rgbToHsl([r,g,b]){
   return { h:h*360, s:s*100, l:l*100 };
 }
 function hexToHsl(hex){ return rgbToHsl(hexToRgb(hex)); }
+/* HSL (h in degrees, s/l in %) back to hex — used to build a harmony target
+   color: we take the base yarn's saturation & lightness and rotate the hue
+   to the harmony angle, giving a realistic "ideal" color to match against. */
+function hslToHex(h, s, l){
+  h=((h%360)+360)%360; s=Math.max(0,Math.min(100,s))/100; l=Math.max(0,Math.min(100,l))/100;
+  const c=(1-Math.abs(2*l-1))*s, x=c*(1-Math.abs((h/60)%2-1)), m=l-c/2;
+  let r=0,g=0,b=0;
+  if(h<60){r=c;g=x;} else if(h<120){r=x;g=c;} else if(h<180){g=c;b=x;}
+  else if(h<240){g=x;b=c;} else if(h<300){r=x;b=c;} else {r=c;b=x;}
+  return rgbToHex([(r+m)*255,(g+m)*255,(b+m)*255]);
+}
+
+/* ---- Perceptual color science (CIELAB + CIEDE2000) ----
+   HSL hue-distance treats all equal degree-steps as equal, but the eye
+   doesn't work that way. Converting to CIELAB and measuring CIEDE2000
+   "Delta-E" gives a distance that tracks how different two colors actually
+   look to a person — accounting for hue, saturation and lightness together,
+   weighted perceptually. This is what makes matches feel aesthetic rather
+   than arithmetic. */
+function srgbToLinear(c){
+  c /= 255;
+  return c <= 0.04045 ? c/12.92 : Math.pow((c+0.055)/1.055, 2.4);
+}
+function rgbToXyz([r,g,b]){
+  const R = srgbToLinear(r), G = srgbToLinear(g), B = srgbToLinear(b);
+  // sRGB D65
+  return [
+    (R*0.4124 + G*0.3576 + B*0.1805) * 100,
+    (R*0.2126 + G*0.7152 + B*0.0722) * 100,
+    (R*0.0193 + G*0.1192 + B*0.9505) * 100
+  ];
+}
+function xyzToLab([x,y,z]){
+  // D65 reference white
+  const xn=95.047, yn=100.0, zn=108.883;
+  const f = t => t > 0.008856 ? Math.cbrt(t) : (7.787*t + 16/116);
+  const fx=f(x/xn), fy=f(y/yn), fz=f(z/zn);
+  return { L: 116*fy - 16, a: 500*(fx-fy), b: 200*(fy-fz) };
+}
+function hexToLab(hex){ return xyzToLab(rgbToXyz(hexToRgb(hex))); }
+
+/* CIEDE2000 — the current standard perceptual color-difference formula. */
+function deltaE2000(lab1, lab2){
+  const {L:L1,a:a1,b:b1}=lab1, {L:L2,a:a2,b:b2}=lab2;
+  const avgL=(L1+L2)/2;
+  const C1=Math.hypot(a1,b1), C2=Math.hypot(a2,b2);
+  const avgC=(C1+C2)/2;
+  const G=0.5*(1-Math.sqrt(Math.pow(avgC,7)/(Math.pow(avgC,7)+Math.pow(25,7))));
+  const a1p=a1*(1+G), a2p=a2*(1+G);
+  const C1p=Math.hypot(a1p,b1), C2p=Math.hypot(a2p,b2);
+  const avgCp=(C1p+C2p)/2;
+  const deg=x=>x*180/Math.PI, rad=x=>x*Math.PI/180;
+  let h1p=deg(Math.atan2(b1,a1p)); if(h1p<0) h1p+=360;
+  let h2p=deg(Math.atan2(b2,a2p)); if(h2p<0) h2p+=360;
+  const dLp=L2-L1, dCp=C2p-C1p;
+  let dhp=0;
+  if(C1p*C2p!==0){
+    dhp=h2p-h1p;
+    if(dhp>180) dhp-=360; else if(dhp<-180) dhp+=360;
+  }
+  const dHp=2*Math.sqrt(C1p*C2p)*Math.sin(rad(dhp)/2);
+  let avghp;
+  if(C1p*C2p===0){ avghp=h1p+h2p; }
+  else{
+    avghp=(h1p+h2p)/2;
+    if(Math.abs(h1p-h2p)>180) avghp += (h1p+h2p<360)?180:-180;
+  }
+  const T=1 -0.17*Math.cos(rad(avghp-30)) +0.24*Math.cos(rad(2*avghp))
+          +0.32*Math.cos(rad(3*avghp+6)) -0.20*Math.cos(rad(4*avghp-63));
+  const dTheta=30*Math.exp(-Math.pow((avghp-275)/25,2));
+  const Rc=2*Math.sqrt(Math.pow(avgCp,7)/(Math.pow(avgCp,7)+Math.pow(25,7)));
+  const Sl=1 + (0.015*Math.pow(avgL-50,2))/Math.sqrt(20+Math.pow(avgL-50,2));
+  const Sc=1+0.045*avgCp;
+  const Sh=1+0.015*avgCp*T;
+  const Rt=-Math.sin(rad(2*dTheta))*Rc;
+  return Math.sqrt(
+    Math.pow(dLp/Sl,2) + Math.pow(dCp/Sc,2) + Math.pow(dHp/Sh,2)
+    + Rt*(dCp/Sc)*(dHp/Sh)
+  );
+}
+/* Weighted Delta-E for the C-tier preferences: scale L / a,b contributions
+   so the user can bias toward matching lightness (tonal projects) vs. hue
+   (bold contrast) vs. a balanced default. Applied by pre-scaling the LAB
+   components before a plain Euclidean-ish combine inside deltaE — simplest
+   honest way to expose the knob without re-deriving CIEDE2000 weights. */
+function weightedDeltaE(labTarget, labCand, mode){
+  const base = deltaE2000(labTarget, labCand);
+  if(mode==='balanced' || !mode) return base;
+  // Nudge: recompute a simple weighted LAB distance and blend it with the
+  // perceptual base so the preference tilts results without ignoring E2000.
+  const dL=labTarget.L-labCand.L, da=labTarget.a-labCand.a, db=labTarget.b-labCand.b;
+  let wL=1, wAB=1;
+  if(mode==='tonal'){ wL=2.2; wAB=0.6; }        // prioritize matching lightness
+  else if(mode==='hue'){ wL=0.4; wAB=1.8; }     // prioritize matching hue/chroma
+  const weighted=Math.sqrt(wL*dL*dL + wAB*(da*da+db*db));
+  return 0.5*base + 0.5*weighted;
+}
+/* Turn a Delta-E-ish distance into a friendly 0–100 closeness score.
+   ~0 ΔE = identical (100%); the eye stops caring much past ~40, so we map
+   that range onto the percentage with a gentle curve. Higher = better. */
+function closenessPercent(distance){
+  const pct = 100 * Math.max(0, 1 - distance/60);
+  return Math.round(pct);
+}
+/* Woolgather's own color vocabulary — a curated set of named regions in
+   color space. nameColor() maps any hex to the perceptually-nearest name
+   (via LAB/Delta-E, same engine as matching). These are sensible common
+   names, NOT manufacturer colorway names — used for dream matches and
+   shopping specs so "shop for sage green" reads better than a hex code. */
+const COLOR_NAMES = [
+  ['Black','#1c1c1c'],['Charcoal','#3a3a3d'],['Slate grey','#5f6670'],['Grey','#9098a1'],
+  ['Silver','#c7ccd1'],['Cream','#efe7d3'],['Ivory','#f5f0e1'],['White','#fbfbf8'],
+  ['Beige','#d8c6a8'],['Tan','#c8a97e'],['Camel','#b98f5a'],['Brown','#6f4e37'],
+  ['Chocolate','#4b3327'],['Rust','#a8432a'],['Terracotta','#c66a45'],['Burnt orange','#c15a1b'],
+  ['Orange','#e07b2a'],['Amber','#d99518'],['Mustard','#c6932f'],['Gold','#d4af37'],
+  ['Yellow','#e8c93a'],['Chartreuse','#a6c34a'],['Olive','#6f7434'],['Moss','#5a6b3b'],
+  ['Sage green','#8faf7c'],['Forest green','#3e6b49'],['Green','#4a9d5a'],['Emerald','#2f8f6b'],
+  ['Teal','#3c7a72'],['Turquoise','#3fb2ac'],['Aqua','#6fc7c1'],['Sky blue','#84b6d6'],
+  ['Blue','#3f6fb5'],['Navy','#2a3a63'],['Indigo','#3b3a7a'],['Periwinkle','#8f8fd6'],
+  ['Lilac','#9b7ec0'],['Lavender','#b7a6d6'],['Purple','#7c4a92'],['Plum','#5c3a72'],
+  ['Magenta','#a83a7a'],['Berry','#8a2f55'],['Wine','#7a2f4b'],['Maroon','#5e2436'],
+  ['Pink','#e090b0'],['Dusty rose','#c98b95'],['Blush','#e6bcbf'],['Red','#c0392b'],['Coral','#e5786b']
+];
+function nameColor(hex){
+  const lab = hexToLab(hex);
+  let best=null, bestD=Infinity;
+  for(const [name,h] of COLOR_NAMES){
+    const d = deltaE2000(lab, hexToLab(h));
+    if(d<bestD){ bestD=d; best=name; }
+  }
+  return best;
+}
 function hueDistance(a,b){ const d=Math.abs(a-b)%360; return d>180 ? 360-d : d; }
 /* Hard-stop conic gradient — reads as distinct wedges of color in order,
    not a blurred blend, which is what you want when the point is to see
@@ -720,7 +962,8 @@ const ICONS = {
   image: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
   dots: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="5" cy="12" r="0.6"/><circle cx="12" cy="12" r="0.6"/><circle cx="19" cy="12" r="0.6"/></svg>',
   gear: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
-  cloudoff: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 2l20 20"/><path d="M5.8 8.02A5 5 0 0 0 6 18h11a4 4 0 0 0 1.9-.48"/><path d="M9.5 5.3A5.5 5.5 0 0 1 18 9a4.5 4.5 0 0 1 2.9 7.5"/></svg>'
+  cloudoff: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 2l20 20"/><path d="M5.8 8.02A5 5 0 0 0 6 18h11a4 4 0 0 0 1.9-.48"/><path d="M9.5 5.3A5.5 5.5 0 0 1 18 9a4.5 4.5 0 0 1 2.9 7.5"/></svg>',
+  cart: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h3l2.4 12.4a1.5 1.5 0 0 0 1.5 1.2h8.3a1.5 1.5 0 0 0 1.5-1.2L22 7H6"/></svg>'
 };
 
 /* =================================================================
@@ -737,6 +980,7 @@ function tabRegistry(){
     { id:'projects', label:'Projects', icon:ICONS.sparkles, primary:true, addLabel:'Add project' },
     { id:'palette', label:'Palette lab', icon:ICONS.palette },
     { id:'showcase', label:'Showcase', icon:ICONS.image, addLabel:'Add project' },
+    { id:'shopping', label:'Shopping list', icon:ICONS.cart },
   ];
   if(isAdmin()) tabs.push({ id:'presets', label:'Presets', icon:ICONS.bookmark });
   return tabs;
@@ -868,6 +1112,7 @@ function renderTab(){
   else if(STATE.tab==='projects') el.innerHTML = renderProjects();
   else if(STATE.tab==='palette') el.innerHTML = renderPalette();
   else if(STATE.tab==='showcase') el.innerHTML = renderShowcase();
+  else if(STATE.tab==='shopping') el.innerHTML = renderShopping();
   else if(STATE.tab==='presets') el.innerHTML = renderPresetsAdmin();
 
   if(STATE.tab==='overview') renderCharts();
@@ -883,7 +1128,7 @@ function switchTab(tab){
 
 async function resetAll(){
   if(!STATE.user) return;
-  if(!confirm("Clear every yarn and project you've logged? This can't be undone.")) return;
+  if(!(await wgConfirm("Clear every yarn and project you've logged? This can't be undone.", {title:'Clear all data', okLabel:'Clear everything', danger:true}))) return;
   STATE.yarns = [];
   STATE.projects = [];
   await persist();
@@ -1007,7 +1252,7 @@ function renderStash(){
 }
 
 function showYarnForm(id){
-  if(!STATE.online){ alert("You're offline — Woolgather is view-only until you reconnect."); return; }
+  if(!STATE.online){ wgToast("You're offline — view-only until you reconnect.", "error"); return; }
   STATE.showYarnForm = true;
   STATE.editingYarnId = id || null;
   const editing = id ? STATE.yarns.find(y=>y.id===id) : null;
@@ -1130,7 +1375,7 @@ async function processSinglePhotoFile(file){
   document.getElementById('yf-extracting').style.display = 'inline';
   let usable;
   try{ usable = await toRenderableImageBlob(file); }
-  catch(err){ document.getElementById('yf-extracting').style.display = 'none'; alert(err.message); return; }
+  catch(err){ document.getElementById('yf-extracting').style.display = 'none'; wgToast(err.message, 'error'); return; }
   const img = new Image();
   const url = URL.createObjectURL(usable);
   img.onload = () => {
@@ -1147,7 +1392,7 @@ async function processSinglePhotoFile(file){
     renderSwatchRow();
     URL.revokeObjectURL(url);
   };
-  img.onerror = () => { document.getElementById('yf-extracting').style.display = 'none'; URL.revokeObjectURL(url); alert('Could not read that photo.'); };
+  img.onerror = () => { document.getElementById('yf-extracting').style.display = 'none'; URL.revokeObjectURL(url); wgToast('Could not read that photo.', 'error'); };
   img.src = url;
 }
 function renderSwatchRow(){
@@ -1297,7 +1542,7 @@ async function processMulticolorPhotoFile(file){
   document.getElementById('yf-multi-extracting').style.display = 'inline';
   let usable;
   try{ usable = await toRenderableImageBlob(file); }
-  catch(err){ document.getElementById('yf-multi-extracting').style.display = 'none'; alert(err.message); return; }
+  catch(err){ document.getElementById('yf-multi-extracting').style.display = 'none'; wgToast(err.message, 'error'); return; }
   const img = new Image();
   const url = URL.createObjectURL(usable);
   img.onload = () => {
@@ -1314,7 +1559,7 @@ async function processMulticolorPhotoFile(file){
     refreshColorSection();
     URL.revokeObjectURL(url);
   };
-  img.onerror = () => { document.getElementById('yf-multi-extracting').style.display = 'none'; URL.revokeObjectURL(url); alert('Could not read that photo.'); };
+  img.onerror = () => { document.getElementById('yf-multi-extracting').style.display = 'none'; URL.revokeObjectURL(url); wgToast('Could not read that photo.', 'error'); };
   img.src = url;
 }
 
@@ -1369,8 +1614,8 @@ function handleSaveYarn(e){
   renderTab();
 }
 
-function deleteYarn(id){
-  if(!confirm('Remove this yarn from your stash? This cannot be undone.')) return;
+async function deleteYarn(id){
+  if(!(await wgConfirm('Remove this yarn from your stash? This cannot be undone.', {title:'Remove yarn', okLabel:'Remove', danger:true}))) return;
   STATE.yarns = STATE.yarns.filter(y=>y.id!==id);
   persist();
   renderTab();
@@ -1486,17 +1731,19 @@ function cleanupOpenForms(){
   STATE.editingYarnId = null;
   STATE.editingProjectId = null;
   pendingProjectYarnUsage = [];
+  pendingProjectYarnRequired = [];
   pendingProjectPhotos = [];
 }
 
 function showProjectForm(id){
-  if(!STATE.online){ alert("You're offline — Woolgather is view-only until you reconnect."); return; }
+  if(!STATE.online){ wgToast("You're offline — view-only until you reconnect.", "error"); return; }
   STATE.showProjectForm = true;
   STATE.editingProjectId = id || uid(); // real id when editing, draft id reserved up front when adding
   const editing = id ? STATE.projects.find(p=>p.id===id) : null;
   pendingProjectYarnIds = editing ? [...(editing.yarnIds||[])] : [];
   pendingProjectLinks = editing ? (editing.links||[]).map(l=>({...l})) : [];
   pendingProjectYarnUsage = editing ? (editing.yarnUsage||[]).map(u=>({...u})) : [];
+  pendingProjectYarnRequired = editing ? (editing.yarnRequired||[]).map(u=>({...u})) : [];
   pendingProjectPhotos = editing ? [...(editing.photos||[])] : [];
   renderTab();
 }
@@ -1552,7 +1799,7 @@ async function processProjectPhotoFile(file){
     pendingProjectPhotos.push(url);
   }catch(err){
     console.error('Photo upload failed', err);
-    alert(err.message || "Couldn't upload that photo — check your connection and try again.");
+    wgToast(err.message || "Couldn't upload that photo — try again.", "error");
   }
   refreshProjectPhotos();
 }
@@ -1584,18 +1831,29 @@ function buildYarnPickerHTML(){
     const allocated = yarnStatus(y)==='allocated';
     const usage = pendingProjectYarnUsage.find(u=>u.yarnId===y.id);
     const used = usage ? usage.yardageUsed : 0;
-    return `<div style="display:flex; align-items:center; gap:8px; padding:7px 2px; border-bottom:1px dashed var(--border); flex-wrap:wrap;">
-      <span class="dot" style="background:${y.colorHex}; flex-shrink:0;"></span>
-      <span style="font-size:0.82rem; flex:1; min-width:110px;">${esc(y.name)}</span>
-      <label style="display:flex; align-items:center; gap:4px; font-size:0.72rem; color:var(--ink-soft);">
-        Used
-        <input type="number" min="0" value="${used}" style="width:58px;" onchange="updateProjectYarnUsage('${y.id}', this.value)" />
-        yd
-      </label>
-      <span class="note" style="font-size:0.7rem; white-space:nowrap;">${y.yardageRemaining} yd left in stash</span>
-      <button type="button" class="btn btn-ghost btn-small" onclick="toggleYarnStatus('${y.id}','${STATE.editingProjectId}')" title="Not fully used? Set it aside so it's excluded from your 'unused stash' count.">${allocated?'Un-allocate':'Allocate'}</button>
-      <button type="button" class="btn btn-ghost btn-small" onclick="removeYarnFromStashInline('${y.id}')" title="Skein is gone — remove it from the stash entirely">${ICONS.trash}</button>
-      <button type="button" class="btn btn-ghost btn-small" onclick="toggleProjectYarn('${y.id}')" title="Unlink from this project (gives back any yardage recorded here)">✕</button>
+    const req = pendingProjectYarnRequired.find(u=>u.yarnId===y.id);
+    const required = req ? req.yardage : '';
+    const reqNum = Number(required)||0;
+    const remaining = Number(y.yardageRemaining)||0;
+    const shortfall = reqNum > remaining ? reqNum - remaining : 0;
+    return `<div style="padding:9px 2px; border-bottom:1px dashed var(--border);">
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span class="dot" style="background:${y.colorHex}; flex-shrink:0;"></span>
+        <span style="font-size:0.82rem; flex:1; min-width:110px;">${esc(y.name)}</span>
+        <button type="button" class="btn btn-ghost btn-small" onclick="toggleYarnStatus('${y.id}','${STATE.editingProjectId}')" title="Not fully used? Set it aside so it's excluded from your 'unused stash' count.">${allocated?'Un-allocate':'Allocate'}</button>
+        <button type="button" class="btn btn-ghost btn-small" onclick="removeYarnFromStashInline('${y.id}')" title="Skein is gone — remove it from the stash entirely">${ICONS.trash}</button>
+        <button type="button" class="btn btn-ghost btn-small" onclick="toggleProjectYarn('${y.id}')" title="Unlink from this project (gives back any yardage recorded here)">✕</button>
+      </div>
+      <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:6px; padding-left:18px;">
+        <label style="display:flex; align-items:center; gap:4px; font-size:0.72rem; color:var(--ink-soft);">
+          Need <input type="number" min="0" value="${required}" placeholder="0" style="width:60px;" onchange="updateProjectYarnRequired('${y.id}', this.value)" /> yd
+        </label>
+        <label style="display:flex; align-items:center; gap:4px; font-size:0.72rem; color:var(--ink-soft);">
+          Used <input type="number" min="0" value="${used}" style="width:60px;" onchange="updateProjectYarnUsage('${y.id}', this.value)" /> yd
+        </label>
+        <span class="note" style="font-size:0.7rem; white-space:nowrap;">${remaining} yd in stash</span>
+        ${shortfall>0 ? `<span class="note" style="font-size:0.7rem; color:var(--wine); white-space:nowrap;">short ${Math.round(shortfall)} yd</span>` : (reqNum>0 ? `<span class="note" style="font-size:0.7rem; color:var(--forest);">enough</span>` : '')}
+      </div>
     </div>`;
   }).join('');
 
@@ -1611,6 +1869,7 @@ function toggleProjectYarn(id){
       persist();
     }
     pendingProjectYarnUsage = pendingProjectYarnUsage.filter(u=>u.yarnId!==id);
+    pendingProjectYarnRequired = pendingProjectYarnRequired.filter(u=>u.yarnId!==id);
     pendingProjectYarnIds = pendingProjectYarnIds.filter(x=>x!==id);
   } else {
     pendingProjectYarnIds = [...pendingProjectYarnIds, id];
@@ -1632,11 +1891,21 @@ function updateProjectYarnUsage(yarnId, val){
   persist();
   refreshYarnPicker();
 }
-function removeYarnFromStashInline(yarnId){
-  if(!confirm('Remove this yarn from your stash entirely? This cannot be undone.')) return;
+/* Per-yarn "need" for this project — pure requirement, doesn't touch stock.
+   Editing it just re-renders so the per-yarn shortfall updates live. */
+function updateProjectYarnRequired(yarnId, val){
+  const newVal = val==='' ? '' : Math.max(0, Number(val)||0);
+  const entry = pendingProjectYarnRequired.find(u=>u.yarnId===yarnId);
+  if(entry) entry.yardage = newVal;
+  else pendingProjectYarnRequired.push({ yarnId, yardage: newVal });
+  refreshYarnPicker();
+}
+async function removeYarnFromStashInline(yarnId){
+  if(!(await wgConfirm('Remove this yarn from your stash entirely? This cannot be undone.', {title:'Remove yarn', okLabel:'Remove', danger:true}))) return;
   STATE.yarns = STATE.yarns.filter(y=>y.id!==yarnId);
   pendingProjectYarnIds = pendingProjectYarnIds.filter(id=>id!==yarnId);
   pendingProjectYarnUsage = pendingProjectYarnUsage.filter(u=>u.yarnId!==yarnId);
+  pendingProjectYarnRequired = pendingProjectYarnRequired.filter(u=>u.yarnId!==yarnId);
   persist();
   refreshYarnPicker();
 }
@@ -1658,9 +1927,6 @@ function renderProjectForm(){
     </label>
     <label class="field">Status
       <select id="pf-status">${STATUSES.map(s=>`<option ${(editing ? editing.status===s : s==='Planned')?'selected':''}>${s}</option>`).join('')}</select>
-    </label>
-    <label class="field">Yardage used — simple total (optional)
-      <input id="pf-yardageused" type="number" min="0" value="${v('yardageUsed')}" />
     </label>
     <label class="field">Start date
       <input id="pf-startdate" type="date" value="${editing ? esc(editing.startDate) : todayStr()}" />
@@ -1692,6 +1958,14 @@ function renderProjectForm(){
         </label>
       </div>
     </details>
+
+    ${STATE.paletteSavedPalettes.length ? `
+    <label class="field span2">Palette (optional)
+      <select id="pf-palette">
+        <option value="">— none —</option>
+        ${STATE.paletteSavedPalettes.map(p=>`<option value="${p.id}" ${editing && editing.paletteId===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}
+      </select>
+    </label>` : ''}
 
     <div class="span2">
       <span class="note" style="display:block; margin-bottom:6px;">Photos (up to 3) — shown on the Showcase tab once this project is Finished</span>
@@ -1798,11 +2072,12 @@ function handleSaveProject(e){
     status: document.getElementById('pf-status').value,
     startDate: document.getElementById('pf-startdate').value || todayStr(),
     finishDate: document.getElementById('pf-finishdate').value || null,
-    yardageUsed: document.getElementById('pf-yardageused').value === '' ? null : Number(document.getElementById('pf-yardageused').value),
     garmentSize: garmentSize || null,
     garmentGender: document.getElementById('pf-garment-gender').value || null,
+    paletteId: (document.getElementById('pf-palette') ? document.getElementById('pf-palette').value : (existing && existing.paletteId)) || null,
     yarnIds: [...pendingProjectYarnIds],
     yarnUsage: pendingProjectYarnUsage.map(u=>({...u})),
+    yarnRequired: pendingProjectYarnRequired.map(u=>({...u})),
     photos: [...pendingProjectPhotos],
     links: pendingProjectLinks.map(l=>({ id:l.id, url:l.url, type:l.type, title:l.title, thumbnail:l.thumbnail }))
   };
@@ -1815,12 +2090,13 @@ function handleSaveProject(e){
   STATE.showProjectForm = false;
   STATE.editingProjectId = null;
   pendingProjectYarnUsage = [];
+  pendingProjectYarnRequired = [];
   pendingProjectPhotos = [];
   renderTab();
 }
 
-function deleteProject(id){
-  if(!confirm("Delete this project? This cannot be undone.")) return;
+async function deleteProject(id){
+  if(!(await wgConfirm("Delete this project? This cannot be undone.", {title:'Delete project', okLabel:'Delete', danger:true}))) return;
   const proj = STATE.projects.find(p=>p.id===id);
   if(proj && proj.photos) proj.photos.forEach(url => window.FB.deletePhoto(url));
   STATE.yarns = STATE.yarns.map(y => y.allocatedTo===id ? { ...y, status:'available', allocatedTo:null } : y);
@@ -1838,6 +2114,9 @@ function renderProjectRow(p){
   const usedYarns = STATE.yarns.filter(y => (p.yarnIds||[]).includes(y.id));
   const daysActive = p.status==='WIP' ? daysBetween(p.startDate, todayStr()) : null;
   const garmentBadge = (p.garmentSize || p.garmentGender) ? [p.garmentGender, p.garmentSize].filter(Boolean).join(' · ') : null;
+  const attachedPalette = p.paletteId ? STATE.paletteSavedPalettes.find(pp=>pp.id===p.paletteId) : null;
+  const gapInfo = projectYardageGap(p);
+  const gapBadge = gapInfo && gapInfo.gap>0 ? `<span class="note" style="color:var(--wine);">need ${Math.round(gapInfo.gap)} yd</span>` : (gapInfo ? `<span class="note" style="color:var(--forest);">enough on hand</span>` : '');
   const linkStrip = (p.links||[]).length ? `<div class="link-strip">${p.links.map(l => l.thumbnail
       ? `<a class="link-card" href="${esc(l.url)}" target="_blank" rel="noopener"><img src="${esc(l.thumbnail)}" alt=""/><span class="link-title">${esc(l.title)}</span></a>`
       : `<a class="link-card generic" href="${esc(l.url)}" target="_blank" rel="noopener">${ICONS.link}<span class="link-title">${esc(l.title)}</span></a>`
@@ -1849,6 +2128,8 @@ function renderProjectRow(p){
       <div class="project-meta">
         ${usedYarns.map(y=>`<span class="dot" style="background:${y.colorHex}" title="${esc(y.name)}"></span>`).join('')}
         ${garmentBadge ? `<span class="note">${esc(garmentBadge)}</span>` : ''}
+        ${attachedPalette ? `<span class="note">${ICONS.palette} ${esc(attachedPalette.name)}</span>` : ''}
+        ${gapBadge}
         ${daysActive!=null ? `<span class="days">${daysActive}d in progress</span>` : ''}
       </div>
       ${linkStrip}
@@ -1856,9 +2137,30 @@ function renderProjectRow(p){
     <select class="status-select" onchange="updateProjectStatus('${p.id}', this.value)">
       ${STATUSES.map(s=>`<option ${s===p.status?'selected':''}>${s}</option>`).join('')}
     </select>
+    ${gapInfo && gapInfo.gap>0 ? `<button class="del-btn" onclick="shopProjectGap('${p.id}')" aria-label="Add gap to shopping list" title="Add the ${Math.round(gapInfo.gap)} yd gap to your shopping list">${ICONS.cart}</button>` : ''}
     <button class="del-btn" onclick="showProjectForm('${p.id}')" aria-label="Edit project">${ICONS.pencil}</button>
     <button class="del-btn" onclick="deleteProject('${p.id}')" aria-label="Delete project">${ICONS.trash}</button>
   </div>`;
+}
+/* Push a project's yardage gap onto the shopping list. Records the source
+   (this project) for future dedup, but the shopping list shows it cleanly. */
+function shopProjectGap(id){
+  if(!STATE.online){ wgToast("You're offline — adding to the shopping list needs a connection.", "error"); return; }
+  const p = STATE.projects.find(pp=>pp.id===id);
+  const gapInfo = projectYardageGap(p);
+  if(!p || !gapInfo || gapInfo.gap<=0) return;
+  // Infer weight from the project's linked yarns if consistent.
+  const linked = STATE.yarns.filter(y=>(p.yarnIds||[]).includes(y.id));
+  const weights = [...new Set(linked.map(y=>y.weightCategory).filter(Boolean))];
+  addShoppingItem({
+    weight: weights.length===1 ? weights[0] : null,
+    yardage: Math.round(gapInfo.gap),
+    quantity: 1,
+    note: 'Project gap',
+    sourceType: 'project', sourceId: p.id, sourceName: p.name
+  });
+  wgToast(`Added ~${Math.round(gapInfo.gap)} yd to your shopping list for "${p.name}".`, "success");
+  renderTab();
 }
 
 /* =================================================================
@@ -1899,25 +2201,72 @@ function weightCompatible(baseWeight, candidateWeight){
   if(bi===null || ci===null) return true;
   return Math.abs(bi-ci) <= 1;
 }
-function suggestPalette(yarns, baseYarn, type){
-  const baseHue = hexToHsl(baseYarn.colorHex).h;
-  const roles = getHarmonyRoles(baseHue, type);
-  const chosen = new Set([baseYarn.id]);
-  return roles.map(r=>{
-    let best=null, bestD=Infinity, bestHex=null;
+function isNeutralYarn(y){
+  // Near-neutral = very low saturation (creams, greys, charcoal, white, black).
+  const hsl = hexToHsl(y.colorHex);
+  return hsl.s < 12;
+}
+/* Returns, for each harmony role, a *ranked* list of candidate matches
+   (best first) rather than only the winner — this is what lets the user
+   cycle through alternatives per slot. Neutral handling: when includeNeutral
+   is on, the LAST role is retargeted to prefer near-neutral yarns. */
+function suggestPalette(yarns, baseYarn, type, includeNeutral){
+  const baseHsl = hexToHsl(baseYarn.colorHex);
+  const roles = getHarmonyRoles(baseHsl.h, type);
+  const mode = STATE.paletteMatchMode;
+
+  return roles.map((r, roleIdx) => {
+    const neutralSlot = includeNeutral && roleIdx === roles.length-1;
+    const targetHex = hslToHex(r.hue, baseHsl.s, baseHsl.l);
+    const targetLab = hexToLab(targetHex);
+
+    // Score every eligible candidate yarn for this slot.
+    const scored = [];
     yarns.forEach(y=>{
-      if(chosen.has(y.id)) return;
+      if(y.id===baseYarn.id) return;
       if(!weightCompatible(baseYarn.weightCategory, y.weightCategory)) return;
+      if(neutralSlot && !isNeutralYarn(y)) return;   // neutral slot: neutrals only
+      if(!neutralSlot && isNeutralYarn(y)) { /* neutrals still allowed elsewhere, just not preferred */ }
       const candidateHexes = (y.isMulticolor && y.matchMode==='full' && y.colors && y.colors.length<=3)
-        ? y.colors
-        : [y.colorHex];
+        ? y.colors : [y.colorHex];
+      let bestForYarn=Infinity, bestHexForYarn=y.colorHex;
       candidateHexes.forEach(hex=>{
-        const d = hueDistance(hexToHsl(hex).h, r.hue);
-        if(d<bestD){ bestD=d; best=y; bestHex=hex; }
+        const dist = weightedDeltaE(targetLab, hexToLab(hex), mode);
+        if(dist<bestForYarn){ bestForYarn=dist; bestHexForYarn=hex; }
       });
+      scored.push({ yarn:y, matchedHex:bestHexForYarn, distance:bestForYarn });
     });
-    if(best) chosen.add(best.id);
-    return {...r, yarn:best, matchedHex:bestHex, distance: best ? Math.round(bestD) : null};
+    scored.sort((a,b)=>a.distance-b.distance);
+
+    return {
+      role: neutralSlot ? 'Neutral' : r.role,
+      hue: r.hue,
+      targetHex,
+      neutralSlot,
+      candidates: scored.map(s=>({
+        yarnId: s.yarn.id, matchedHex: s.matchedHex,
+        distance: s.distance, closeness: closenessPercent(s.distance)
+      }))
+    };
+  });
+}
+/* Resolve the currently-displayed pick for each slot given the user's
+   per-slot choice index (from cycling) and de-duplication so two slots
+   don't show the same yarn. Returns display-ready rows. */
+function resolvePaletteSlots(slots){
+  const used = new Set([STATE.paletteBaseId]);
+  return slots.map((slot, i) => {
+    const choiceIdx = STATE.paletteSlotChoice[i] || 0;
+    // Walk from the chosen index, skipping yarns already used by earlier slots.
+    let pick=null, pickList=slot.candidates;
+    // First pass honoring the exact choice index if it's free:
+    for(let step=0; step<pickList.length; step++){
+      const idx=(choiceIdx+step)%pickList.length;
+      if(!used.has(pickList[idx].yarnId)){ pick=pickList[idx]; break; }
+    }
+    if(pick) used.add(pick.yarnId);
+    const yarn = pick ? STATE.yarns.find(y=>y.id===pick.yarnId) : null;
+    return { ...slot, pick, yarn, altCount: slot.candidates.length };
   });
 }
 
@@ -1936,44 +2285,225 @@ function renderPalette(){
   }
   if(!STATE.paletteBaseId || !colored.find(y=>y.id===STATE.paletteBaseId)) STATE.paletteBaseId = colored[0].id;
   const base = colored.find(y=>y.id===STATE.paletteBaseId);
-  const results = suggestPalette(colored, base, STATE.paletteHarmony);
+  const slots = suggestPalette(colored, base, STATE.paletteHarmony, STATE.paletteIncludeNeutral);
+  const resolved = resolvePaletteSlots(slots);
 
   const baseSwatchBg = base.isMulticolor && base.colors && base.colors.length>=2 ? buildConicGradient(base.colors) : base.colorHex;
-  const picks = `<div class="palette-pick">
+
+  const basePick = `<div class="palette-pick">
       <span class="palette-swatch" style="background:${baseSwatchBg}"></span>
       <p style="margin:0; font-weight:500; font-size:0.85rem;">${esc(yarnDisplayName(base))}</p>
       <p class="note" style="margin:0;">Base</p>
-    </div>` + results.filter(r=>r.yarn).map(r=>{
-      const viaMulticolor = r.yarn.isMulticolor && r.matchedHex && r.matchedHex!==r.yarn.colorHex;
-      return `
-    <div class="palette-pick">
-      <span class="palette-swatch" style="background:${r.matchedHex || r.yarn.colorHex}"></span>
-      <p style="margin:0; font-weight:500; font-size:0.85rem;">${esc(yarnDisplayName(r.yarn))}</p>
-      <p class="note" style="margin:0;">${esc(r.role)}${r.distance!=null ? ' · '+r.distance+'° off' : ''}${viaMulticolor ? ' · via one of its colors' : ''}</p>
     </div>`;
-    }).join('');
 
-  const stretched = results.some(r=>r.distance!=null && r.distance>35);
-  const unfilledByWeight = results.some(r=>!r.yarn);
+  const slotPicks = resolved.map((r,i)=>{
+    if(!r.yarn){
+      return `<div class="palette-pick">
+        <span class="palette-swatch" style="background:var(--bg); border:1px dashed var(--border);"></span>
+        <p class="note" style="margin:0;">${esc(r.role)}</p>
+        <p class="note" style="margin:0;">no match</p>
+      </div>`;
+    }
+    const via = r.yarn.isMulticolor && r.pick.matchedHex && r.pick.matchedHex!==r.yarn.colorHex;
+    const locked = STATE.paletteSlotChoice['lock'+i];
+    return `<div class="palette-pick">
+      <span class="palette-swatch" style="background:${r.pick.matchedHex || r.yarn.colorHex}"></span>
+      <p style="margin:0; font-weight:500; font-size:0.85rem;">${esc(yarnDisplayName(r.yarn))}</p>
+      <p class="note" style="margin:0;">${esc(r.role)} · ${r.pick.closeness}% match${via?' · via one of its colors':''}</p>
+      <div style="display:flex; gap:6px; margin-top:6px; align-items:center;">
+        <button class="harmony-btn" style="font-size:0.68rem; padding:3px 8px;" onclick="cyclePaletteSlot(${i})" ${r.altCount<2?'disabled':''} title="Show next-closest option">Swap ⟳</button>
+        <button class="harmony-btn ${locked?'active':''}" style="font-size:0.68rem; padding:3px 8px;" onclick="togglePaletteLock(${i})" title="Lock this pick">${locked?'Locked':'Lock'}</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  const stretched = resolved.some(r=>r.pick && r.pick.closeness<55);
+  const unfilled = resolved.some(r=>!r.yarn);
+
+  // Dream matches: the ideal target color for each slot, named, shown as a
+  // shoppable gap. This is the "what would complete this palette" section —
+  // the target colors regardless of whether your stash can fill them.
+  const baseHslForDream = hexToHsl(base.colorHex);
+  const dreamMatches = suggestPalette(colored, base, STATE.paletteHarmony, STATE.paletteIncludeNeutral).map((slot,i)=>{
+    const resolvedSlot = resolved[i];
+    const name = nameColor(slot.targetHex);
+    const closeEnough = resolvedSlot.yarn && resolvedSlot.pick && resolvedSlot.pick.closeness>=70;
+    const owned = closeEnough && yarnStatus(resolvedSlot.yarn)!=='allocated';
+    // A close match exists but it's allocated to another project — worth
+    // flagging distinctly so "shop it" doesn't imply you own nothing suitable.
+    const allocatedOnly = closeEnough && yarnStatus(resolvedSlot.yarn)==='allocated';
+    return { role:slot.role, hex:slot.targetHex, name, owned, allocatedOnly };
+  });
+  const dreamCard = `<div class="card palette-picks">${dreamMatches.map((d,i)=>`
+    <div class="palette-pick">
+      <span class="palette-swatch" style="background:${d.hex}"></span>
+      <p style="margin:0; font-weight:500; font-size:0.85rem;">${esc(d.name)}</p>
+      <p class="note" style="margin:0;">${esc(d.role)}${d.owned?' · in stash ✓':(d.allocatedOnly?' · owned but allocated':'')}</p>
+      ${!d.owned ? `<button class="harmony-btn" style="font-size:0.68rem; padding:3px 8px; margin-top:6px;" onclick="shopDreamMatch('${STATE.paletteBaseId}','${STATE.paletteHarmony}',${i})" title="${d.allocatedOnly?'Your close match is allocated elsewhere — add another to your shopping list':'Add this color to your shopping list'}">${ICONS.cart} Shop</button>` : ''}
+    </div>`).join('')}</div>`;
+
+  const MATCH_MODES = [['balanced','Balanced'],['tonal','Match lightness'],['hue','Match hue']];
+
+  // Saved palettes list
+  const savedList = STATE.paletteSavedPalettes.length ? `
+    <h2 style="font-size:1.05rem; margin:26px 0 10px;">Saved palettes</h2>
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      ${STATE.paletteSavedPalettes.map(renderSavedPaletteCard).join('')}
+    </div>` : '';
 
   return `
   <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end; margin-bottom:18px;">
     <label class="field" style="flex:1; min-width:0; max-width:100%;">Base yarn
-      <select class="palette-base-select" onchange="STATE.paletteBaseId=this.value; renderTab();">
+      <select class="palette-base-select" onchange="setPaletteBase(this.value)">
         ${colored.map(y=>`<option value="${y.id}" ${y.id===base.id?'selected':''}>${esc(yarnDisplayName(y))}</option>`).join('')}
       </select>
     </label>
     <div style="display:flex; gap:6px; flex-wrap:wrap;">
-      ${HARMONIES.map(h=>`<button class="harmony-btn ${STATE.paletteHarmony===h?'active':''}" title="${esc(HARMONY_DESCRIPTIONS[h])}" onclick="STATE.paletteHarmony='${h}'; renderTab();">${h}</button>`).join('')}
+      ${HARMONIES.map(h=>`<button class="harmony-btn ${STATE.paletteHarmony===h?'active':''}" title="${esc(HARMONY_DESCRIPTIONS[h])}" onclick="setPaletteHarmony('${h}')">${h}</button>`).join('')}
     </div>
   </div>
   <p class="note" style="margin:-10px 0 4px;">${esc(HARMONY_DESCRIPTIONS[STATE.paletteHarmony])}</p>
-  <p class="note" style="margin:0 0 14px;">Matches are limited to yarn within one weight category of the base (e.g. DK only matches Sport or Worsted).</p>
-  <div class="card palette-picks">${picks}</div>
-  ${stretched ? `<p class="note" style="margin-top:14px;">Your stash doesn't have a close match for every slot in this harmony — the closest options above are a bit of a stretch. Might be a sign it's time to add to the stash, or try a different harmony.</p>` : ''}
-  ${unfilledByWeight ? `<p class="note" style="margin-top:6px;">Matches are limited to yarn within one weight category of ${esc(base.weightCategory||'the base')} — one or more roles didn't have a compatible-weight match in your stash.</p>` : ''}
-  ${excludedCount>0 ? `<p class="note" style="margin-top:6px;">${excludedCount} skein${excludedCount===1?'':'s'} with 4+ colors ${excludedCount===1?"isn't":"aren't"} eligible for matching and ${excludedCount===1?"is":"are"} left out of this list.</p>` : ''}
+  <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:0 0 10px;">
+    <span class="note">Match priority:</span>
+    ${MATCH_MODES.map(([id,label])=>`<button class="harmony-btn ${STATE.paletteMatchMode===id?'active':''}" style="font-size:0.72rem; padding:4px 10px;" onclick="setPaletteMatchMode('${id}')">${label}</button>`).join('')}
+    <button class="harmony-btn ${STATE.paletteIncludeNeutral?'active':''}" style="font-size:0.72rem; padding:4px 10px; margin-left:6px;" onclick="togglePaletteNeutral()" title="Fill one slot with your closest neutral instead of a color">+ Neutral</button>
+  </div>
+  <h2 style="font-size:1.05rem; margin:22px 0 8px;">Stash matches</h2>
+  <div class="card palette-picks">${basePick}${slotPicks}</div>
+  <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
+    <button class="btn btn-primary" onclick="saveCurrentPalette()">${ICONS.bookmark} Save this palette</button>
+    <button class="btn btn-ghost" onclick="resetPaletteChoices()">Reset swaps</button>
+  </div>
+  <p class="note" style="margin-top:10px;">Matches are ranked by perceptual color similarity (how close they look to the eye), limited to yarn within one weight category of the base. Tap Swap to cycle a slot to its next-closest option, or Lock to keep one.</p>
+  ${stretched ? `<p class="note" style="margin-top:6px;">Some slots don't have a strong match in your stash — the closest options are a bit of a stretch. Might be time to add to the stash, or try a different harmony.</p>` : ''}
+  ${unfilled ? `<p class="note" style="margin-top:6px;">One or more roles didn't have a compatible match in your stash.</p>` : ''}
+  ${excludedCount>0 ? `<p class="note" style="margin-top:6px;">${excludedCount} skein${excludedCount===1?'':'s'} with 4+ colors ${excludedCount===1?"isn't":"aren't"} eligible for matching.</p>` : ''}
+
+  <h2 style="font-size:1.05rem; margin:26px 0 8px;">Dream matches</h2>
+  <p class="note" style="margin:0 0 8px;">The ideal color for each slot — what would complete this harmony. Tap Shop to send colors you don't own to your shopping list.</p>
+  ${dreamCard}
+  ${dreamMatches.some(d=>!d.owned) ? `<button class="btn btn-ghost btn-small" style="margin-top:10px;" onclick="shopAllDreamMatches('${STATE.paletteBaseId}','${STATE.paletteHarmony}')">${ICONS.cart} Shop all missing colors</button>` : ''}
+  ${savedList}
   `;
+}
+
+/* Builder controls — changing base/harmony/mode resets per-slot swaps and
+   locks, since the slots themselves change. */
+function setPaletteBase(id){ STATE.paletteBaseId=id; STATE.paletteSlotChoice={}; renderTab(); }
+function setPaletteHarmony(h){ STATE.paletteHarmony=h; STATE.paletteSlotChoice={}; renderTab(); }
+function setPaletteMatchMode(m){ STATE.paletteMatchMode=m; STATE.paletteSlotChoice={}; renderTab(); }
+function togglePaletteNeutral(){ STATE.paletteIncludeNeutral=!STATE.paletteIncludeNeutral; STATE.paletteSlotChoice={}; renderTab(); }
+function resetPaletteChoices(){ STATE.paletteSlotChoice={}; renderTab(); }
+/* Send a dream-match (ideal target color for a slot) to the shopping list,
+   named and weight-tagged, recording the source palette for future dedup. */
+function shopDreamMatch(baseId, harmony, slotIndex){
+  if(!STATE.online){ wgToast("You're offline — adding to the shopping list needs a connection.", "error"); return; }
+  const colored = STATE.yarns.filter(eligibleForPalette);
+  const base = colored.find(y=>y.id===baseId);
+  if(!base) return;
+  const slots = suggestPalette(colored, base, harmony, STATE.paletteIncludeNeutral);
+  const slot = slots[slotIndex];
+  if(!slot) return;
+  addShoppingItem({
+    colorName: nameColor(slot.targetHex),
+    hex: slot.targetHex,
+    weight: base.weightCategory || null,
+    quantity: 1,
+    note: harmony+' palette',
+    sourceType:'palette', sourceId: base.id, sourceName: `${yarnDisplayName(base).split(' - ')[0]} ${harmony} palette`
+  });
+  wgToast(`Added ${nameColor(slot.targetHex)} to your shopping list.`, "success");
+  renderTab();
+}
+/* Bulk version: add every dream-match color the user doesn't already own a
+   close match for. Skips slots already well-covered by stash (>=70% match). */
+function shopAllDreamMatches(baseId, harmony){
+  if(!STATE.online){ wgToast("You're offline — adding to the shopping list needs a connection.", "error"); return; }
+  const colored = STATE.yarns.filter(eligibleForPalette);
+  const base = colored.find(y=>y.id===baseId);
+  if(!base) return;
+  const slots = suggestPalette(colored, base, harmony, STATE.paletteIncludeNeutral);
+  const resolved = resolvePaletteSlots(slots);
+  let added=0;
+  slots.forEach((slot,i)=>{
+    const rs = resolved[i];
+    const owned = rs.yarn && rs.pick && rs.pick.closeness>=70 && yarnStatus(rs.yarn)!=='allocated';
+    if(owned) return;
+    addShoppingItem({
+      colorName: nameColor(slot.targetHex),
+      hex: slot.targetHex,
+      weight: base.weightCategory || null,
+      quantity: 1,
+      note: harmony+' palette',
+      sourceType:'palette', sourceId: base.id, sourceName: `${yarnDisplayName(base).split(' - ')[0]} ${harmony} palette`
+    });
+    added++;
+  });
+  wgToast(added ? `Added ${added} color${added===1?'':'s'} to your shopping list.` : 'Your stash already covers this palette.', added?'success':undefined);
+  renderTab();
+}
+
+function cyclePaletteSlot(i){
+  if(STATE.paletteSlotChoice['lock'+i]) return; // locked slots don't cycle
+  const cur = STATE.paletteSlotChoice[i] || 0;
+  STATE.paletteSlotChoice[i] = cur + 1;   // resolve wraps modulo candidate count
+  renderTab();
+}
+function togglePaletteLock(i){
+  STATE.paletteSlotChoice['lock'+i] = !STATE.paletteSlotChoice['lock'+i];
+  renderTab();
+}
+
+/* Save the currently-displayed arrangement as a named palette. Stores yarn
+   IDs + the matched hex for each slot, so it survives even if matching logic
+   changes later, and can show a "no longer in stash" state if a yarn is gone. */
+async function saveCurrentPalette(){
+  if(!STATE.online){ wgToast("You're offline — saving palettes needs a connection.", "error"); return; }
+  const colored = STATE.yarns.filter(eligibleForPalette);
+  const base = colored.find(y=>y.id===STATE.paletteBaseId);
+  if(!base) return;
+  const slots = suggestPalette(colored, base, STATE.paletteHarmony, STATE.paletteIncludeNeutral);
+  const resolved = resolvePaletteSlots(slots);
+  const name = await wgPrompt('', {title:'Save palette', defaultValue:`${yarnDisplayName(base).split(' - ')[0]} ${STATE.paletteHarmony}`, placeholder:'Palette name', okLabel:'Save'});
+  if(name===null) return;
+  const palette = {
+    id: uid(),
+    name: name.trim() || 'Untitled palette',
+    harmony: STATE.paletteHarmony,
+    matchMode: STATE.paletteMatchMode,
+    baseYarnId: base.id,
+    slots: resolved.filter(r=>r.yarn).map(r=>({ role:r.role, yarnId:r.yarn.id, hex:r.pick.matchedHex||r.yarn.colorHex, closeness:r.pick.closeness })),
+    createdAt: todayStr()
+  };
+  STATE.paletteSavedPalettes.unshift(palette);
+  persist();
+  wgToast('Palette saved.', 'success');
+  renderTab();
+}
+async function deleteSavedPalette(id){
+  if(!(await wgConfirm('Delete this saved palette?', {title:'Delete palette', okLabel:'Delete', danger:true}))) return;
+  STATE.paletteSavedPalettes = STATE.paletteSavedPalettes.filter(p=>p.id!==id);
+  persist();
+  renderTab();
+}
+function renderSavedPaletteCard(p){
+  const base = STATE.yarns.find(y=>y.id===p.baseYarnId);
+  const baseHex = base ? (base.isMulticolor && base.colors && base.colors.length>=2 ? buildConicGradient(base.colors) : base.colorHex) : '#ccc';
+  const dots = [`<span class="palette-swatch" style="width:34px;height:34px;background:${baseHex}" title="${base?esc(yarnDisplayName(base)):'(base no longer in stash)'}"></span>`]
+    .concat(p.slots.map(s=>{
+      const y = STATE.yarns.find(yy=>yy.id===s.yarnId);
+      const title = y ? esc(yarnDisplayName(y)) : '(no longer in stash)';
+      const border = y ? '' : 'opacity:0.4; border:1px dashed var(--border);';
+      return `<span class="palette-swatch" style="width:34px;height:34px;background:${s.hex};${border}" title="${title}"></span>`;
+    })).join('');
+  return `<div class="card" style="display:flex; align-items:center; gap:12px;">
+    <div style="display:flex; gap:6px; flex-wrap:wrap;">${dots}</div>
+    <div style="flex:1; min-width:0;">
+      <p style="margin:0; font-weight:600; font-size:0.9rem;">${esc(p.name)}</p>
+      <p class="note" style="margin:1px 0 0;">${esc(p.harmony)}${p.createdAt?' · '+esc(p.createdAt):''}</p>
+    </div>
+    <button class="del-btn" onclick="deleteSavedPalette('${p.id}')" aria-label="Delete palette">${ICONS.trash}</button>
+  </div>`;
 }
 
 /* =================================================================
@@ -2020,6 +2550,269 @@ function renderShowcaseCard(p){
         ${p.finishDate ? `<span class="note">${esc(p.finishDate)}</span>` : ''}
       </div>
     </div>
+  </div>`;
+}
+
+/* =================================================================
+   Shopping list — first-class saved object. Gaps from projects and
+   dream-match palette slots flow in here. Each item records its source
+   (project/palette id) for future dedup, but the list is shown cleanly
+   grouped; source is only surfaced on tap. External search (Google /
+   Ravelry) is generated from each item's spec — Woolgather owns the
+   decision, the retailer owns product discovery.
+================================================================= */
+function shoppingSearchQuery(item){
+  return [item.colorName, item.weight, item.fiber, item.yardage ? ('~'+item.yardage+' yards') : '', 'yarn']
+    .filter(Boolean).join(' ');
+}
+function googleSearchUrl(item){
+  return 'https://www.google.com/search?q=' + encodeURIComponent(shoppingSearchQuery(item));
+}
+function ravelrySearchUrl(item){
+  // Ravelry yarn search by free-text query.
+  return 'https://www.ravelry.com/yarns/search#query=' + encodeURIComponent(
+    [item.colorName, item.weight, item.fiber].filter(Boolean).join(' ')
+  );
+}
+function addShoppingItem(item){
+  STATE.shoppingList.unshift({
+    id: uid(),
+    colorName: item.colorName || null,
+    hex: item.hex || null,
+    weight: item.weight || null,
+    fiber: item.fiber || null,
+    yardage: item.yardage || null,
+    quantity: item.quantity || 1,
+    note: item.note || null,
+    sourceType: item.sourceType || 'manual',   // 'project' | 'palette' | 'manual'
+    sourceId: item.sourceId || null,
+    sourceName: item.sourceName || null,
+    done: false,
+    createdAt: todayStr()
+  });
+  persist();
+}
+function removeShoppingItem(id){
+  STATE.shoppingList = STATE.shoppingList.filter(i=>i.id!==id);
+  persist();
+  renderTab();
+}
+function toggleShoppingDone(id){
+  STATE.shoppingList = STATE.shoppingList.map(i=> i.id===id ? {...i, done:!i.done} : i);
+  persist();
+  renderTab();
+}
+async function clearDoneShopping(){
+  if(!STATE.shoppingList.some(i=>i.done)) return;
+  if(!(await wgConfirm('Remove all checked-off items?', {title:'Clear checked', okLabel:'Remove', danger:true}))) return;
+  STATE.shoppingList = STATE.shoppingList.filter(i=>!i.done);
+  persist();
+  renderTab();
+}
+/* Add a manual item via quick prompts (kept simple; a full form can come
+   later). Colour name is optional free text. */
+function addManualShoppingItem(){
+  if(!STATE.online){ wgToast("You're offline — adding to the shopping list needs a connection.", "error"); return; }
+  STATE.showShoppingForm = true;
+  renderTab();
+}
+function hideShoppingForm(){ STATE.showShoppingForm = false; renderTab(); }
+function submitShoppingForm(e){
+  if(e) e.preventDefault();
+  const colorName = document.getElementById('sf-color').value.trim();
+  const weight = document.getElementById('sf-weight').value;
+  const fiber = document.getElementById('sf-fiber').value.trim();
+  const yardage = document.getElementById('sf-yardage').value;
+  const qty = document.getElementById('sf-qty').value;
+  addShoppingItem({
+    colorName: colorName||null,
+    weight: weight||null,
+    fiber: fiber||null,
+    yardage: yardage===''?null:Number(yardage),
+    quantity: Number(qty)||1,
+    sourceType:'manual'
+  });
+  STATE.showShoppingForm = false;
+  wgToast('Added to shopping list.', 'success');
+  renderTab();
+}
+function renderShoppingForm(){
+  return `<form class="card form-grid" onsubmit="submitShoppingForm(event)" style="margin-bottom:16px;">
+    <label class="field">Color (optional)
+      <input id="sf-color" placeholder="e.g. sage green" />
+    </label>
+    <label class="field">Weight (optional)
+      <select id="sf-weight"><option value="">—</option>${WEIGHTS.map(w=>`<option>${w}</option>`).join('')}</select>
+    </label>
+    <label class="field">Fiber (optional)
+      <input id="sf-fiber" placeholder="e.g. wool" />
+    </label>
+    <label class="field">Yardage needed (optional)
+      <input id="sf-yardage" type="number" min="0" placeholder="e.g. 220" />
+    </label>
+    <label class="field">Quantity (skeins)
+      <input id="sf-qty" type="number" min="1" value="1" />
+    </label>
+    <div></div>
+    <div class="span2" style="display:flex; gap:8px; justify-content:flex-end;">
+      <button type="button" class="btn btn-ghost" onclick="hideShoppingForm()">Cancel</button>
+      <button type="submit" class="btn btn-primary">Add item</button>
+    </div>
+  </form>`;
+}
+
+function renderShopping(){
+  const items = STATE.shoppingList;
+  let html = buildInStoreSection();
+  html += `<h2 style="font-size:1.05rem; margin:24px 0 10px;">Shopping list</h2>`;
+  html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+    <p class="note">${items.length} item${items.length===1?'':'s'}${items.some(i=>i.done)?` · ${items.filter(i=>i.done).length} checked`:''}</p>
+    <div style="display:flex; gap:8px;">
+      ${items.some(i=>i.done) ? `<button class="btn btn-ghost btn-small" onclick="clearDoneShopping()">Clear checked</button>` : ''}
+      ${STATE.online && !STATE.showShoppingForm ? `<button class="btn btn-primary btn-small" onclick="addManualShoppingItem()">${ICONS.plus} Add item</button>` : ''}
+    </div>
+  </div>`;
+
+  if(STATE.showShoppingForm) html += renderShoppingForm();
+
+  if(items.length===0){
+    html += `<div class="empty"><p class="title">Nothing to shop for yet</p><p class="body">Add items here manually, or send gaps here from a project ("need N more yards") or from Palette Lab dream matches. Each item gets Google and Ravelry search links.</p></div>`;
+    return html;
+  }
+
+  html += `<div style="display:flex; flex-direction:column; gap:10px;">${items.map(renderShoppingItem).join('')}</div>`;
+  return html;
+}
+
+/* In-store color check: snap/upload a photo of a skein you're looking at,
+   extract its color (existing k-means), then show the closest colors already
+   in your stash and whether any project/palette wants that color — all
+   client-side, no OCR, no external service. Answers "do I already own
+   something like this, and does anything need it?" */
+function buildInStoreSection(){
+  const captured = STATE.inStoreColor;
+  const swatchStrip = STATE.inStoreExtracted.length
+    ? `<div class="swatch-row" style="justify-content:center;">${STATE.inStoreExtracted.map(s=>`<button type="button" class="swatch-btn ${captured===s.hex?'selected':''}" style="background:${s.hex}" title="${s.hex}" onclick="pickInStoreColor('${s.hex}')"></button>`).join('')}</div>`
+    : '';
+
+  let result = '';
+  if(captured){
+    const capLab = hexToLab(captured);
+    // Closest stash yarns by perceptual distance.
+    const ranked = STATE.yarns.filter(y=>y.colorHex).map(y=>{
+      const hexes = (y.isMulticolor && y.colors && y.colors.length) ? y.colors : [y.colorHex];
+      let best=Infinity, bh=y.colorHex;
+      hexes.forEach(h=>{ const d=deltaE2000(capLab, hexToLab(h)); if(d<best){best=d;bh=h;} });
+      return { yarn:y, dist:best, hex:bh, closeness:closenessPercent(best) };
+    }).sort((a,b)=>a.dist-b.dist).slice(0,4);
+
+    const veryClose = ranked.filter(r=>r.closeness>=80);
+    const ownedMsg = veryClose.length
+      ? `<p class="note" style="margin:0 0 8px; color:var(--forest);">You already own ${veryClose.length} very similar skein${veryClose.length===1?'':'s'} — you may not need this.</p>`
+      : `<p class="note" style="margin:0 0 8px;">Nothing in your stash is a close match — this could be a genuine gap-filler.</p>`;
+
+    // Does any project gap or palette dream-match want this color?
+    const wants = [];
+    STATE.projects.forEach(p=>{
+      const g = projectYardageGap(p);
+      if(g && g.gap>0){
+        const linked = STATE.yarns.filter(y=>(p.yarnIds||[]).includes(y.id));
+        if(linked.some(y=>deltaE2000(capLab, hexToLab(y.colorHex))<15)){
+          wants.push(`Project "${esc(p.name)}" still needs ~${Math.round(g.gap)} yd of a similar color`);
+        }
+      }
+    });
+    const wantsMsg = wants.length ? `<div class="card" style="margin:0 0 10px; font-size:0.82rem;">${wants.map(w=>`<p style="margin:2px 0;">✓ ${w}</p>`).join('')}</div>` : '';
+
+    const rankedList = ranked.length
+      ? `<div style="display:flex; flex-direction:column; gap:8px;">${ranked.map(r=>`
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span class="swatch" style="background:${r.hex}"></span>
+            <span style="flex:1; min-width:0; font-size:0.85rem;">${esc(yarnDisplayName(r.yarn))}</span>
+            <span class="note">${r.closeness}% similar</span>
+          </div>`).join('')}</div>`
+      : `<p class="note">Your stash is empty — nothing to compare against yet.</p>`;
+
+    result = `
+      <div style="display:flex; align-items:center; gap:12px; margin:10px 0;">
+        <span class="palette-swatch" style="width:48px;height:48px;background:${captured}"></span>
+        <div>
+          <p style="margin:0; font-weight:600;">${esc(nameColor(captured))}</p>
+          <p class="note" style="margin:1px 0 0;">Captured color</p>
+        </div>
+        <button class="btn btn-ghost btn-small" style="margin-left:auto;" onclick="clearInStoreColor()">Clear</button>
+      </div>
+      ${ownedMsg}
+      ${wantsMsg}
+      <p class="note" style="margin:6px 0 6px;">Closest in your stash:</p>
+      ${rankedList}`;
+  }
+
+  return `<details ${captured?'open':''} class="card" style="margin-bottom:6px;">
+    <summary style="cursor:pointer; font-weight:600; font-family:'Fraunces',serif;">${ICONS.image} In-store color check</summary>
+    <p class="note" style="margin:8px 0;">Looking at a skein in a shop? Snap or upload a photo to see if you already own something like it — and whether any project wants that color.</p>
+    <div class="photo-dropzone" ondragover="onPhotoDropzoneDragOver(event)" ondragleave="onPhotoDropzoneDragLeave(event)" ondrop="onInStoreDrop(event)">
+      <span class="note">Drag a photo here, or</span>
+      <button type="button" class="btn btn-ghost btn-small" onclick="document.getElementById('instore-photo').click()">${ICONS.upload} Upload / take photo</button>
+      <input id="instore-photo" type="file" accept="image/*,.heic,.heif" capture="environment" style="display:none" onchange="handleInStorePhoto(event)" />
+    </div>
+    <span id="instore-extracting" class="note" style="display:none; margin-top:8px;">Reading colors…</span>
+    ${swatchStrip}
+    ${result}
+  </details>`;
+}
+function handleInStorePhoto(e){
+  const file=e.target.files[0]; e.target.value='';
+  if(file) processInStorePhoto(file);
+}
+function onInStoreDrop(e){
+  e.preventDefault(); e.currentTarget.classList.remove('dragover');
+  const file=e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if(file) processInStorePhoto(file);
+}
+async function processInStorePhoto(file){
+  if(!isAcceptableImageFile(file)) return;
+  const statusEl=document.getElementById('instore-extracting');
+  if(statusEl) statusEl.style.display='inline';
+  let usable;
+  try{ usable = await toRenderableImageBlob(file); }
+  catch(err){ if(statusEl) statusEl.style.display='none'; wgToast(err.message, 'error'); return; }
+  const img=new Image(); const url=URL.createObjectURL(usable);
+  img.onload=()=>{
+    const size=50, canvas=document.createElement('canvas');
+    canvas.width=size; canvas.height=size;
+    const ctx=canvas.getContext('2d'); ctx.drawImage(img,0,0,size,size);
+    const data=ctx.getImageData(0,0,size,size).data;
+    const pixels=[];
+    for(let i=0;i<data.length;i+=4){ if(data[i+3]<100) continue; pixels.push([data[i],data[i+1],data[i+2]]); }
+    STATE.inStoreExtracted = kMeansColors(pixels,5,6).slice(0,5);
+    STATE.inStoreColor = STATE.inStoreExtracted.length ? STATE.inStoreExtracted[0].hex : null;
+    if(statusEl) statusEl.style.display='none';
+    URL.revokeObjectURL(url);
+    renderTab();
+  };
+  img.onerror=()=>{ if(statusEl) statusEl.style.display='none'; URL.revokeObjectURL(url); wgToast('Could not read that photo.', 'error'); };
+  img.src=url;
+}
+function pickInStoreColor(hex){ STATE.inStoreColor=hex; renderTab(); }
+function clearInStoreColor(){ STATE.inStoreColor=null; STATE.inStoreExtracted=[]; renderTab(); }
+
+function renderShoppingItem(it){
+  const spec = [it.colorName, it.weight, it.fiber, it.yardage?('~'+it.yardage+' yd'):''].filter(Boolean).join(' · ') || 'Yarn';
+  const src = it.sourceType!=='manual' && it.sourceName
+    ? `<p class="note" style="margin:2px 0 0;">for: ${esc(it.sourceName)}</p>` : '';
+  return `<div class="card" style="display:flex; align-items:flex-start; gap:12px; ${it.done?'opacity:0.55;':''}">
+    <button onclick="toggleShoppingDone('${it.id}')" aria-label="Toggle done" style="background:none;border:1px solid var(--border);border-radius:5px;width:22px;height:22px;flex-shrink:0;cursor:pointer;color:var(--forest);font-size:0.9rem;line-height:1;margin-top:2px;">${it.done?'✓':''}</button>
+    ${it.hex ? `<span class="swatch" style="background:${it.hex}; margin-top:1px;"></span>` : ''}
+    <div style="flex:1; min-width:0;">
+      <p style="margin:0; font-weight:500; font-size:0.9rem; ${it.done?'text-decoration:line-through;':''}">${it.quantity>1?it.quantity+'× ':''}${esc(spec)}</p>
+      ${src}
+      <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+        <a class="btn btn-ghost btn-small" href="${esc(googleSearchUrl(it))}" target="_blank" rel="noopener">Search Google</a>
+        <a class="btn btn-ghost btn-small" href="${esc(ravelrySearchUrl(it))}" target="_blank" rel="noopener">Search Ravelry</a>
+      </div>
+    </div>
+    <button class="del-btn" onclick="removeShoppingItem('${it.id}')" aria-label="Remove">${ICONS.trash}</button>
   </div>`;
 }
 
@@ -2082,7 +2875,7 @@ async function handleAddPreset(){
     renderTab();
   }catch(e){
     console.error('Could not add preset', e);
-    alert("Couldn't save that preset — check the console for details.");
+    wgToast("Couldn't save that preset — check the console for details.", "error");
   }
 }
 
@@ -2130,6 +2923,8 @@ function initApp(){
         const data = await window.FB.loadUserData(user.uid);
         STATE.yarns = (data && data.yarns) || [];
         STATE.projects = (data && data.projects) || [];
+        STATE.paletteSavedPalettes = (data && data.palettes) || [];
+        STATE.shoppingList = (data && data.shoppingList) || [];
       }catch(e){
         console.error('Could not load your data', e);
         STATE.yarns = [];
