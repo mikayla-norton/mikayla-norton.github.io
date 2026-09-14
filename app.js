@@ -676,11 +676,17 @@ function render(){
   ).join('');
 
   // Desktop header actions (hidden on mobile via CSS; mobile uses Settings in More)
-  const headerRight = `<div class="header-actions">
-       <span class="note">${esc(STATE.user.displayName || STATE.user.email || 'Signed in')}</span>
-       <button class="btn btn-ghost btn-small" onclick="window.FB.signOutUser()">Sign out</button>
-       <button class="reset-btn" onclick="resetAll()">${ICONS.reset} Clear my data</button>
-     </div>`;
+  const headerRight = window.WG_DEMO
+    ? `<div class="header-actions">
+         <span class="note">You're viewing a demo</span>
+         <a class="btn btn-primary btn-small" href="${window.WG_SIGNUP_URL || '/woolgather.html'}">Sign up free</a>
+         <a class="btn btn-ghost btn-small" href="${window.WG_SIGNUP_URL || '/woolgather.html'}">Log in</a>
+       </div>`
+    : `<div class="header-actions">
+         <span class="note">${esc(STATE.user.displayName || STATE.user.email || 'Signed in')}</span>
+         <button class="btn btn-ghost btn-small" onclick="window.FB.signOutUser()">Sign out</button>
+         <button class="reset-btn" onclick="resetAll()">${ICONS.reset} Clear my data</button>
+       </div>`;
 
   app.innerHTML = `
     <div class="wrap">
@@ -752,13 +758,21 @@ function renderSettingsSheet(){
   div.className = 'sheet-backdrop open';
   div.id = 'settings-sheet';
   div.onclick = (e)=>{ if(e.target===div) closeSettings(); };
-  div.innerHTML = `<div class="sheet">
-    <div class="sheet-handle"></div>
-    <p style="padding:2px 22px 10px; font-family:'Fraunces',serif; font-weight:600;">Settings</p>
-    <p class="note" style="padding:0 22px 10px;">${esc(STATE.user.displayName || STATE.user.email || 'Signed in')}</p>
-    <button onclick="window.FB.signOutUser()">${ICONS.reset}<span>Sign out</span></button>
-    <button onclick="closeSettings(); resetAll();" class="danger-text">${ICONS.trash}<span>Clear my data</span></button>
-  </div>`;
+  div.innerHTML = window.WG_DEMO
+    ? `<div class="sheet">
+        <div class="sheet-handle"></div>
+        <p style="padding:2px 22px 10px; font-family:'Fraunces',serif; font-weight:600;">You're exploring the demo</p>
+        <p class="note" style="padding:0 22px 12px;">Everything here is sample data — changes reset on refresh. Create a free account to build your own stash.</p>
+        <a class="btn btn-primary" style="margin:0 22px 8px; display:block; text-align:center;" href="${window.WG_SIGNUP_URL || '/woolgather.html'}">Sign up free</a>
+        <a class="btn btn-ghost" style="margin:0 22px; display:block; text-align:center;" href="${window.WG_SIGNUP_URL || '/woolgather.html'}">Log in</a>
+      </div>`
+    : `<div class="sheet">
+        <div class="sheet-handle"></div>
+        <p style="padding:2px 22px 10px; font-family:'Fraunces',serif; font-weight:600;">Settings</p>
+        <p class="note" style="padding:0 22px 10px;">${esc(STATE.user.displayName || STATE.user.email || 'Signed in')}</p>
+        <button onclick="window.FB.signOutUser()">${ICONS.reset}<span>Sign out</span></button>
+        <button onclick="closeSettings(); resetAll();" class="danger-text">${ICONS.trash}<span>Clear my data</span></button>
+      </div>`;
   document.getElementById('app').appendChild(div);
 }
 function closeSettings(){ STATE.settingsOpen = false; const s=document.getElementById('settings-sheet'); if(s) s.remove(); }
@@ -800,7 +814,7 @@ async function handleEmailAuth(e){
   try{
     if(mode==='signup'){
       await window.FB.signUpEmail(email, password);
-      wgToast('Account created — check your email to verify.', 'success');
+      wgToast('Account created — check your email to verify. If you don’t see it in your inbox, check your spam/junk folder.', 'success');
     } else {
       await window.FB.signInEmail(email, password);
     }
@@ -2969,6 +2983,7 @@ function initApp(){
    already launched as an installed app), and only once (dismissal sticks
    via localStorage — used purely for this UI preference, not app data). */
 function maybeShowIosInstallHint(){
+  if(window.WG_DEMO) return;   // demo doesn't prompt to install
   const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const isStandalone = window.navigator.standalone === true ||
     window.matchMedia('(display-mode: standalone)').matches;
@@ -3012,7 +3027,7 @@ else {
    app). When a new version is deployed and the SW updates, we show a small
    "Update available" bar rather than silently serving stale-then-fresh, so
    the user chooses when to reload into the new version. */
-if('serviceWorker' in navigator){
+if('serviceWorker' in navigator && !window.WG_DEMO){
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').then((reg) => {
       // A new SW has been found and is installing.
