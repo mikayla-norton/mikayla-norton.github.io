@@ -310,3 +310,10 @@
   .metabar{display:flex;flex-wrap:wrap;gap:9px 14px;align-items:center;margin:16px 0 4px;}
   .metabar .date{font-family:var(--mono);font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--forest);}
   .toolrow{display:flex;flex-wrap:wrap;gap:7px;margin:4px 0 26px;}
+
+  /* figures (project write-ups) */
+  .figure{margin:10px 0 26px;background:var(--card);border:1px solid var(--border);
+    border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);}
+  .figure img{width:100%;border-radius:6px;display:block;background:#fff;}
+  .figure figcaption{font-size:13.5px;color:var(--ink-soft);margin-top:12px;line-height:1.5;}
+  .figure figcaption b{color:var(--ink);font-weight:600;}

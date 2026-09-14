@@ -53,6 +53,11 @@
 
       <p>This was the final project for <strong>STT 810 — Mathematical Statistics for Data Scientists</strong>, a course in the M.S. Data Science program taught by Dr. Paul Speaker. Working with a partner, Chris Grandy, I set out to predict a track's popularity from a Spotify dataset of roughly 20,000 songs and 15 numerical and categorical features.</p>
 
+      <figure class="figure">
+        <img src="images/music-distribution.png" alt="Histogram showing the distribution of song popularity, roughly bell-shaped and centered in the 50s to 60s" loading="lazy">
+        <figcaption><b>The target.</b> Popularity is roughly bell-shaped and centered in the 50s–60s — most songs are middling, with far fewer true hits or flops.</figcaption>
+      </figure>
+
       <h2>The approach</h2>
       <p>We treated it as a supervised learning problem, built entirely in R. The pipeline ran from exploratory analysis and feature engineering through visualization and modeling, validated on a 70/30 train–test split. Along the way we leaned on the standard R toolkit for this kind of work:</p>
       <ul class="dots">
@@ -63,6 +68,22 @@
 
       <h2>What we found</h2>
       <p>The honest headline: popularity in this dataset was close to random. Most features carried little signal, and even the best predictors explained only a modest slice of the variance. Rather than force a more complex model to chase noise, we kept the model simple and let the data set the ceiling.</p>
+
+      <figure class="figure">
+        <img src="images/music-correlation.png" alt="Correlation matrix of all audio features; the song popularity row shows only faint correlations with every feature" loading="lazy">
+        <figcaption><b>The story is the top row.</b> Song popularity barely correlates with any single feature — while the audio features correlate plenty with <em>each other</em> (energy with loudness; acousticness against energy). Green is positive, plum is negative; bigger, deeper circles mean a stronger relationship.</figcaption>
+      </figure>
+
+      <figure class="figure">
+        <img src="images/music-energy-density.png" alt="Two-dimensional density of song popularity against energy, showing a broad hotspot around energy 0.7 and popularity 60" loading="lazy">
+        <figcaption><b>Even the stronger features stay soft.</b> Popular songs cluster around energy ≈ 0.7 — but the hotspot is wide and flat. High energy nudges popularity; it never determines it.</figcaption>
+      </figure>
+
+      <figure class="figure">
+        <img src="images/music-observed-predicted.png" alt="Observed versus predicted song popularity; predicted values form a narrow band near the mean while observed values scatter across the full range" loading="lazy">
+        <figcaption><b>The punchline.</b> The model's predictions (teal) barely leave the mean — its safest bet is "about average" — while the true values (coral) scatter across the whole range. When the features don't carry the signal, this is what an honest model looks like.</figcaption>
+      </figure>
+
       <p>That turned out to be the real lesson of the project — not every question has a strong enough signal to build a genuinely predictive model from, and recognizing that early is its own kind of result. It's a lesson that has stuck with me well beyond the course: interrogate whether the relationship exists before investing in the model that assumes it does.</p>
 
       <h2>Data</h2>
