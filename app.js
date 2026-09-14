@@ -16,7 +16,7 @@ const ADMIN_EMAIL = "miknorton19@gmail.com";
 /* URL of the deployed "linkPreview" Cloud Function — see setup notes.
    Fill this in after deploying; until then, pattern/blog links just fall
    back to a plain bookmark card with the domain name, same as before. */
-const LINK_PREVIEW_ENDPOINT = "REPLACE_ME_LINK_PREVIEW_URL";
+const LINK_PREVIEW_ENDPOINT = "https://linkpreview-deanu6jutq-uc.a.run.app";
 function isAdmin(){ return !!(STATE.user && STATE.user.email === ADMIN_EMAIL); }
 /* True when the viewport is in mobile layout territory — matches the CSS
    breakpoint so JS behavior and CSS stay in agreement. */
@@ -878,7 +878,7 @@ async function handleCheckVerified(){
 async function handleResendVerification(){
   try{
     await window.FB.resendVerification();
-    wgToast('Verification email resent.', 'success');
+    wgToast('Verification email resent. If you don’t see it in your inbox, check your spam/junk folder.', 'success');
   }catch(err){ wgToast(friendlyAuthError(err), 'error'); }
 }
 
