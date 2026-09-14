@@ -1,147 +1,91 @@
-<!DOCTYPE HTML>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Music Popularity Predictor — a graduate statistics project by Mikayla Norton modeling Spotify song popularity from audio features in R.">
+<link rel="shortcut icon" type="image/png" href="images/Favicon.png">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Music Popularity Predictor — Mikayla Norton">
+<meta property="og:description" content="Modeling Spotify song popularity from audio features in R — and a lesson in when the signal isn't there.">
+<meta name="twitter:card" content="summary_large_image">
+<title>Music Popularity Predictor — Mikayla Norton</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400;1,9..144,500;1,9..144,600&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/site.css">
+</head>
+<body>
 
-<html>
-	<head>
-		<title>Statistics in Music - Mikayla Norton</title>
-		<link rel="shortcut icon" type="image/png" href="images/Favicon.png"/>
-		<meta charset="utf-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-		<link rel="stylesheet" href="assets/css/main.css" />
-	</head>
-	<body class="is-preload">
+<nav class="nav">
+  <div class="inner">
+    <a class="brand" href="index.html">Mikayla <em>Norton</em></a>
+    <ul>
+      <li><a href="index.html#work">Work</a></li>
+      <li><a href="projects.html">Projects</a></li>
+      <li><a href="index.html#contact">Contact</a></li>
+      <li><a class="navcv" href="cv.html">CV</a></li>
+    </ul>
+  </div>
+</nav>
 
-		<!-- Wrapper -->
-			<div id="wrapper">
+<header class="pagehead">
+  <div class="container">
+    <a class="backlink" href="projects.html">← All projects</a>
+    <span class="eyebrow">Graduate project · Modeling</span>
+    <h1>Music Popularity <em>Predictor</em></h1>
+    <div class="metabar">
+      <span class="date">STT 810 · Michigan State · 2022</span>
+    </div>
+    <div class="toolrow">
+      <span class="pill forest">R</span>
+      <span class="pill plum">Regression</span>
+      <span class="pill line">Feature engineering</span>
+      <span class="pill line">Data viz</span>
+    </div>
+  </div>
+</header>
 
-				<!-- Main -->
-					<div id="main">
-						<div class="inner">
+<section class="section" style="padding-top:8px;border-top:none;">
+  <div class="container">
+    <div class="article">
+      <p class="lead">How much of a song's popularity is actually written into its audio features — and how much is just noise?</p>
 
-							<!-- Header -->
-								<header id="header">
-									<a href="statistics-in-music.html" class="logo"><strong>Statistics in Music</strong> - Mikayla Norton</a>
-									<ul class="icons">
-										<li><a href="https://www.facebook.com/profile.php?id=100006002689323" class="icon brands fa-facebook-official"><span class="label">Facebook</span></a></li>
-										<li><a href="https://www.instagram.com/k.nort23/" class="icon brands fa-instagram"><span class="label">Instagram</span></a></li>
-										<li><a href="https://www.linkedin.com/in/mikaylanorton/" class="icon brands fa-linkedin-in"><span class="label">LinkedIn</span></a></li>
-										<li><a href="https://www.pinterest.com/kknort23/" class="icon brands fa-pinterest"><span class="label">Pinterest</span></a></li>
-										<li><a href="https://open.spotify.com/user/k-nort23" class="icon brands fa-spotify"><span class="label">Spotify</span></a></li>
-										<li><a href="https://www.etsy.com/shop/YouEXCELGirl" class="icon brands fa-etsy"><span class="label">Etsy</span></a></li>
-										<li><a href="https://vsco.co/k-nort/gallery" class="icon solid fa-camera-retro"><span class="label">VSCO</span></a></li>
+      <p>This was the final project for <strong>STT 810 — Mathematical Statistics for Data Scientists</strong>, a course in the M.S. Data Science program taught by Dr. Paul Speaker. Working with a partner, Chris Grandy, I set out to predict a track's popularity from a Spotify dataset of roughly 20,000 songs and 15 numerical and categorical features.</p>
 
-									</ul>
-								</header>
+      <h2>The approach</h2>
+      <p>We treated it as a supervised learning problem, built entirely in R. The pipeline ran from exploratory analysis and feature engineering through visualization and modeling, validated on a 70/30 train–test split. Along the way we leaned on the standard R toolkit for this kind of work:</p>
+      <ul class="dots">
+        <li><strong>Wrangling &amp; stats:</strong> dplyr, tidyverse, MASS, caTools</li>
+        <li><strong>Correlation &amp; visualization:</strong> ggplot2, corrplot, Plotly, patchwork</li>
+      </ul>
+      <p>The final model used a small, deliberate set of predictors — <strong>energy, key, and speechiness</strong> — which the exploratory work flagged as the features with any real relationship to popularity.</p>
 
-							<!-- Content -->
-								<section>
-									<header class="main">
-										<h1>Music Popularity Predictor</h1>
-									</header>
-									<h2>How do song metrics impact popularity?</h2>
-									<p>Statistics 810, also referred to as "Mathematical Statistics for Data Scientists" at Michigan State is part of the Master's in Data Science degree program and instructed by Dr. Paul Speaker.</p>
-									<p>Much of the coursework includes hands-on application of statistical materials learned in class with computational applications in R. The final assignment in the course assigned a partnership based project using Spotify track information for songs, including their popularity rating and a number of numerical and categorical characteristics.</p>
-									<p>The goal of the project was to develop a predictive model using simple statistics, feature engineering, data visualization, and analytics to predict song popularity. With my partner, Chris Grandy (M.S. Data Science candidate), we completed exploratory analytics to come to the conclusion that the model was particularly random and a few categories of raw data were truly the best predictor of this seemingly random dataset. We used a 70%-30% train-test-split to test our conclusions. Computational design of this model was conducted in R, using the following packages:
-										<ul>
-											<li>ggplot2</li>
-											<li>dplyr</li>
-											<li>corrplot</li>
-											<li>tidyverse</li>
-											<li>MASS</li>
-											<li>Plotly</li>
-											<li>Patchwork</li>
-											<li>caTools</li>
-										</ul>
-									The source of the data provided is found <a href="https://www.kaggle.com/code/amansorout/spotify-song-popularity-classification">here.</a>
-									</p>
-									<p>The full report and exploration is shown below and can be read in detail to view the processes followed. Our final model elected to use characteristics in energy, key, and speechiness to predict song popularity. The project was a phenomenal lesson that not all information has strong enough connections to develop truly successful models from. It would be ideal to continue the investigation outside the scope of the course timeline.</p>
+      <h2>What we found</h2>
+      <p>The honest headline: popularity in this dataset was close to random. Most features carried little signal, and even the best predictors explained only a modest slice of the variance. Rather than force a more complex model to chase noise, we kept the model simple and let the data set the ceiling.</p>
+      <p>That turned out to be the real lesson of the project — not every question has a strong enough signal to build a genuinely predictive model from, and recognizing that early is its own kind of result. It's a lesson that has stuck with me well beyond the course: interrogate whether the relationship exists before investing in the model that assumes it does.</p>
 
-									<div style="width:100%; padding-bottom:56.25%; position:relative;">
-										  <iframe src="stt810.html" style="position:absolute; top:0px; left:0px;
-										  width:100%; height:100%; border: none; overflow: hidden;"></iframe>
-									</div>
+      <h2>Data</h2>
+      <p>The dataset came from a public <a href="https://www.kaggle.com/code/amansorout/spotify-song-popularity-classification" target="_blank" rel="noopener">Spotify song popularity collection on Kaggle</a>.</p>
+    </div>
+  </div>
+</section>
 
-								</section>
+<footer class="contact">
+  <div class="container">
+    <span class="eyebrow">More work</span>
+    <h2>Keep exploring.</h2>
+    <p class="ci">This is one of a dozen projects — see the full archive, or the CV for the complete record.</p>
+    <div class="actions">
+      <a class="btn btn-ondark" href="projects.html">All projects</a>
+      <a class="btn btn-ghost" style="color:#EAD9F0;border-color:rgba(246,238,241,.3);" href="cv.html">View the CV</a>
+    </div>
+    <div class="base">
+      <span>Mikayla Norton · Portland, OR</span>
+      <span><a class="home" href="index.html" style="color:rgba(237,227,242,.7);text-decoration:none;">← Back to mikaylanorton.com</a></span>
+    </div>
+  </div>
+</footer>
 
-						</div>
-					</div>
-
-					<!-- Sidebar -->
-						<div id="sidebar">
-							<div class="inner">
-
-
-								<!-- Menu -->
-									<nav id="menu">
-										<header class="major">
-											<h2>Menu</h2>
-										</header>
-										<ul>
-											<li><a href="index.html">Home</a></li>
-                      <li>
-  											<span class="opener">Projects</span>
-  											<ul>
-												<li><a href="https://mikaylanorton-vibesync.streamlit.app/">VibeSync</a></li>
-												<li><a href="https://signvisionai.streamlit.app/">SignVision AI</a></li>
-												<li><a href="https://mri-tumor-classifier.streamlit.app/">NeuroNet MRI</a></li>
-												<li><a href="https://egle-brownfields-capstone.streamlit.app/"> Brownfields Reporting</a></li>
-												<li><a href="https://cmse830-emissions-mnorton.streamlit.app/">Geographic Annual Emissions</a></li>
-												<li><a href="movie-algorithms.html">Movie Recommendation Algorithms</a></li>
-												<li><a href="credit-classifier.html">Credit Score Modeling and Classification</a></li>
-												<li><a href="capstone.html">Supplier Data Management</a></li>
-												<li><a href="statistics-in-music.html">Music Popularity Predictor</a></li>
-												<li><a href="invasive-species.html">An Invasive Species Study on Severity</a></li>
-												<li><a href="avah.html">Analysis of Voice and Hearing Lab</a></li>
-											</ul>
-  										</li>
-											<li><a href="background.html">Background</a></li>
-											<li><a href="cv.html">Curriculum Vitae</a></li>
-											<li><a href="human.html">Outside the &ltScript&gt</a></li>
-
-										</ul>
-									</nav>
-
-								<!-- Section -->
-								<section>
-									<header class="major">
-										<h2>Latest Updates</h2>
-									</header>
-									<div class="mini-posts">
-										<!-- <article>
-										<script src="https://platform.linkedin.com/badges/js/profile.js" async defer type="text/javascript"></script>
-										<div class="badge-base LI-profile-badge" data-locale="en_US" data-size="medium" data-theme="light" data-type="VERTICAL" data-vanity="mikaylanorton" data-version="v1"><a class="badge-base__link LI-simple-link" href="https://www.linkedin.com/in/mikaylanorton?trk=profile-badge"></a></div>
-									</article> -->
-											<article>
-												<a href="https://github.com/mikayla-norton/mikayla-norton.github.io" class="image"><img src="http://ghchart.rshah.org/mikayla-norton" alt="mikayla-norton's Github chart" /></a>
-												<p>After many mini-projects in front-end web development, this portfolio autobiography has been the most substantial project I have utilized web development languages and Github for. Keep up to date on my self-taught adventure by checking out the repository.</p>
-											</article>
-									</div>
-								</section>
-
-								<!-- Section DONE -->
-									<section>
-										<header class="major">
-											<h2>Get in Touch</h2>
-										</header>
-										<p> Contact me or connect with any questions, collaborative interests or just to chat with a fellow impassioned "Data Guru". </p>
-										<ul class="contact">
-										<li class="icon solid fa-envelope"><a href="mailto:mikayla.e.norton@gmail.com">mikayla.e.norton@gmail.com</a></li>
-										<li class="icon solid fa-phone">(517) 304-6875</li>
-										<li class="icon solid fa-home">Hillsboro, OR</li>
-										</ul>
-									</section>
-
-
-							</div>
-						</div>
-
-				</div>
-
-			<!-- Scripts -->
-				<script src="assets/js/jquery.min.js"></script>
-				<script src="assets/js/browser.min.js"></script>
-				<script src="assets/js/breakpoints.min.js"></script>
-				<script src="assets/js/util.js"></script>
-				<script src="assets/js/main.js"></script>
-
-		</body>
-	</html>
+</body>
+</html>
