@@ -317,3 +317,9 @@
   .figure img{width:100%;border-radius:6px;display:block;background:#fff;}
   .figure figcaption{font-size:13.5px;color:var(--ink-soft);margin-top:12px;line-height:1.5;}
   .figure figcaption b{color:var(--ink);font-weight:600;}
+
+  /* watermark icon on project-card thumbs */
+  .card .thumb{overflow:hidden;}
+  .thumb-icon{position:absolute;right:-10px;bottom:-12px;width:92px;height:92px;
+    color:#F1EEF3;opacity:.30;stroke-width:1.5;pointer-events:none;display:block;
+    stroke-linecap:round;stroke-linejoin:round;}

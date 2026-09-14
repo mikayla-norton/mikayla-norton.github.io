@@ -829,7 +829,7 @@ async function handleForgotPassword(){
   if(!email.trim()){ wgToast('Please enter your email.', 'error'); return; }
   try{
     await window.FB.resetPassword(email.trim());
-    wgToast('Password reset email sent — check your inbox.', 'success');
+    wgToast('Password reset email sent — check your inbox. If you don’t see it in your inbox, check your spam/junk folder', 'success');
   }catch(err){
     wgToast(friendlyAuthError(err), 'error');
   }
@@ -857,6 +857,7 @@ function renderVerifyGate(){
     <div class="card">
       <h2 style="font-family:'Fraunces',serif; font-size:1.2rem; margin:0 0 4px;">Verify your email</h2>
       <p class="note" style="margin:0 0 14px;">We sent a verification link to <strong class="muted-ink">${esc(STATE.user.email||'your email')}</strong>. Click it, then tap "I've verified" below.</p>
+      <p class="note" style="margin:0 0 14px;">If you don’t see it in your inbox, check your spam/junk folder.</p>
       <button class="btn btn-primary" style="width:100%; margin-bottom:8px;" onclick="handleCheckVerified()">I've verified — continue</button>
       <button class="btn btn-ghost" style="width:100%; margin-bottom:8px;" onclick="handleResendVerification()">Resend verification email</button>
       <button class="btn btn-ghost full-width" onclick="window.FB.signOutUser()">Sign out</button>
@@ -870,7 +871,7 @@ async function handleCheckVerified(){
       wgToast('Email verified — welcome!', 'success');
       render();
     } else {
-      wgToast("Not verified yet — click the link in your email first.", 'error');
+      wgToast("Not verified yet — click the link in your email first. If you don’t see it in your inbox, check your spam/junk folder", 'error');
     }
   }catch(err){ wgToast(friendlyAuthError(err), 'error'); }
 }
